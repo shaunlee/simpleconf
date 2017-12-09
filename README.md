@@ -28,10 +28,10 @@ http http://localhost/db/product
 ## benchmarks
 
 ```
-BenchmarkGet-4      10000000           151 ns/op
-BenchmarkSet-4       2000000           648 ns/op
-BenchmarkDel-4       3000000           478 ns/op
-BenchmarkClone-4     1000000          1305 ns/op
+BenchmarkGet-4      30000000            50.7 ns/op
+BenchmarkSet-4      10000000           201 ns/op
+BenchmarkDel-4      20000000           107 ns/op
+BenchmarkClone-4     2000000           769 ns/op
 ```
 
 ## interfaces
