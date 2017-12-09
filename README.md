@@ -18,7 +18,7 @@ Returns raw JSON
 
 #### Set values by key path
 
-`POST /db/{key.path}
+`POST /db/{key.path}`
 
 Post raw JSON body
 
