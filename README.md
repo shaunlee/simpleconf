@@ -30,6 +30,21 @@ Post raw JSON body
 
 `POST /clone/{from.key.path}/{to.key.path}`
 
+## example
+
+```bash
+echo '2017' | http http://localhost/db/product.year
+echo '"Demo"' | http http://localhost/db/product.name
+echo 'false' | http http://localhost/db/product.is_expired
+
+http http://localhost/db/product
+{
+    "is_expired": false, 
+    "name": "Demo", 
+    "year": 2017
+}
+```
+
 ## benchmarks
 
 ```
