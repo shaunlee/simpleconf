@@ -15,6 +15,14 @@ http http://localhost/db/product
     "name": "Demo", 
     "year": 2017
 }
+
+http delete http://localhost/db/product.is_expired
+
+http http://localhost/db/product
+{
+    "name": "Demo", 
+    "year": 2017
+}
 ```
 
 ## benchmarks
