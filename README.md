@@ -2,6 +2,17 @@
 
 Most simple way to read write configuration.
 
+## usage
+
+```bash
+./simpleconf
+
+  -db string
+        Appendonly database filename (default "data.aof")
+  -listen string
+        Http server address listen on (default ":3000")
+```
+
 ## example
 
 ```bash
