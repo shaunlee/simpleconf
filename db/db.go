@@ -63,7 +63,7 @@ func InitDb(dbfile string) {
 		}
 	}()
 
-	db, _ = os.OpenFile(dbfile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
+	db, _ = os.OpenFile(dbfile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0600)
 
 	reader := bufio.NewReader(db)
 	for {
