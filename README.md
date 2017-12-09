@@ -57,13 +57,13 @@ Returns raw JSON, in case of dump the database, don't use it often
 
 `GET /db/{key.path}`
 
-Returns raw JSON
+Returns raw JSON, use key path as fine-grained as possible
 
 #### Set values by key path
 
 `POST /db/{key.path}`
 
-Post raw JSON body
+Post any of raw JSON body
 
 #### Delete values key path
 
