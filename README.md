@@ -47,7 +47,7 @@ BenchmarkClone-4     2000000           769 ns/op    1,300,390 tps
 
 ## interfaces
 
-#### Get whole configurations
+#### Get whole configurations, in case of dump the database
 
 `GET /db`
 
