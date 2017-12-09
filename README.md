@@ -47,11 +47,11 @@ BenchmarkClone-4     2000000           769 ns/op    1,300,390 tps
 
 ## interfaces
 
-#### Get whole configurations, in case of dump the database
+#### Get whole configurations
 
 `GET /db`
 
-Returns raw JSON
+Returns raw JSON, in case of dump the database, don't use it often
 
 #### Get values with key path
 
