@@ -1,19 +1,19 @@
 package db
 
 import (
-	"os"
-	"fmt"
 	"bufio"
-	"io/ioutil"
+	"fmt"
 	"github.com/json-iterator/go"
+	"github.com/shaunlee/simpleconf/helpers"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
-	"github.com/shaunlee/simpleconf/helpers"
+	"io/ioutil"
+	"os"
 )
 
 var (
-	json = jsoniter.ConfigCompatibleWithStandardLibrary
-	db *os.File
+	json          = jsoniter.ConfigCompatibleWithStandardLibrary
+	db            *os.File
 	Configuration = "{}"
 )
 

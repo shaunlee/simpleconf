@@ -2,9 +2,9 @@ package main
 
 import (
 	"flag"
-	"log"
 	"github.com/shaunlee/simpleconf/controllers"
 	"github.com/shaunlee/simpleconf/db"
+	"log"
 )
 
 func main() {
