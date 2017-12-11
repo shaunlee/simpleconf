@@ -1,3 +1,4 @@
 simpleconf
 *.aof
+*.bak
 *.sw*

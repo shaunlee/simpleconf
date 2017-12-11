@@ -101,7 +101,7 @@ func reopen() {
 func erase() {
 	FreeDb()
 
-	os.Remove(dbfilename)
+	os.Rename(dbfilename, dbfilename + ".bak")
 
 	reopen()
 }
