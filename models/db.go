@@ -2,7 +2,6 @@ package models
 
 import (
 	"bufio"
-	"fmt"
 	"github.com/json-iterator/go"
 	"github.com/shaunlee/simpleconf/helpers"
 	"github.com/tidwall/gjson"
@@ -24,9 +23,7 @@ func setonly(k string, v interface{}) {
 func Set(k string, v interface{}) {
 	setonly(k, v)
 
-	fmt.Fprintf(db, "+%v\n", k)
-	pv, _ := json.Marshal(v)
-	fmt.Fprintf(db, "%s\n", string(pv))
+	persists <- &persistable{SetCmd, k, v}
 }
 
 func delonly(k string) {
@@ -36,7 +33,7 @@ func delonly(k string) {
 func Del(k string) {
 	delonly(k)
 
-	fmt.Fprintf(db, "-%v\n", k)
+	persists <- &persistable{DelCmd, k, nil}
 }
 
 func Get(k string) string {
@@ -58,25 +55,20 @@ func dump() {
 }
 
 func InitDb(dbfile string) {
-	defer func() {
-		if err := recover(); err != nil {
-		}
-	}()
-
 	db, _ = os.OpenFile(dbfile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0600)
 
 	reader := bufio.NewReader(db)
 	for {
 		kl := helpers.Readline(reader)
 		if kl == nil {
-			panic("end")
+			break
 		}
 
 		switch kl[0] {
 		case '+':
 			vl := helpers.Readline(reader)
 			if vl == nil {
-				panic("end")
+				break
 			}
 
 			setonly(string(kl[1:]), helpers.Bytes2Obj(vl))
@@ -84,6 +76,8 @@ func InitDb(dbfile string) {
 			delonly(string(kl[1:]))
 		}
 	}
+
+	go persist()
 }
 
 func FreeDb() {
