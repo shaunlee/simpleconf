@@ -6,12 +6,12 @@ import (
 	"github.com/shaunlee/simpleconf/helpers"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
-	"io/ioutil"
 	"os"
 )
 
 var (
 	json          = jsoniter.ConfigCompatibleWithStandardLibrary
+	dbfilename    string
 	db            *os.File
 	Configuration = "{}"
 )
@@ -50,12 +50,17 @@ func Clone(fk, tk string) {
 	Set(tk, helpers.Bytes2Obj([]byte(v)))
 }
 
-func dump() {
-	ioutil.WriteFile("dump.json", []byte(Configuration), 0644)
+func RewriteAof() {
+	suspend <- true
+	erase()
+	<-resume
+	persists <- &persistable{DumpCmd, "", nil}
 }
 
 func InitDb(dbfile string) {
-	db, _ = os.OpenFile(dbfile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0600)
+	dbfilename = dbfile
+
+	reopen()
 
 	reader := bufio.NewReader(db)
 	for {
@@ -72,6 +77,13 @@ func InitDb(dbfile string) {
 			}
 
 			setonly(string(kl[1:]), helpers.Bytes2Obj(vl))
+		case '*':
+			vl := helpers.Readline(reader)
+			if vl == nil {
+				break
+			}
+
+			Configuration = string(vl)
 		case '-':
 			delonly(string(kl[1:]))
 		}
@@ -80,6 +92,23 @@ func InitDb(dbfile string) {
 	go persist()
 }
 
+func reopen() {
+	FreeDb()
+
+	db, _ = os.OpenFile(dbfilename, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0600)
+}
+
+func erase() {
+	FreeDb()
+
+	os.Remove(dbfilename)
+
+	reopen()
+}
+
 func FreeDb() {
-	db.Close()
+	if db != nil {
+		db.Close()
+		db = nil
+	}
 }

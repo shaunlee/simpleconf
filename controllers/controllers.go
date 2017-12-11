@@ -45,6 +45,14 @@ func clone(ctx iris.Context) {
 	})
 }
 
+func rewrite_aof(ctx iris.Context) {
+	models.RewriteAof()
+
+	ctx.JSON(iris.Map{
+		"ok": true,
+	})
+}
+
 func Route(addr string) {
 	app := iris.New()
 
@@ -53,6 +61,7 @@ func Route(addr string) {
 	app.Post("/db/{key}", update)
 	app.Delete("/db/{key}", forget)
 	app.Post("/clone/{from_key}/{to_key}", clone)
+	app.Post("/rewriteaof", rewrite_aof)
 
 	app.Run(iris.Addr(addr))
 }

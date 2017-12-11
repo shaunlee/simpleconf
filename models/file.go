@@ -9,6 +9,7 @@ type Cmd uint8
 const (
 	SetCmd = Cmd(iota)
 	DelCmd
+	DumpCmd
 )
 
 type persistable struct {
@@ -17,19 +18,27 @@ type persistable struct {
 	value interface{}
 }
 
-var persists = make(chan *persistable, 100)
+var (
+	suspend = make(chan bool)
+	resume = make(chan bool)
+	persists = make(chan *persistable, 100)
+)
 
 func persist() {
 	for {
-		row := <-persists
-
-		switch row.command {
-		case SetCmd:
-			fmt.Fprintf(db, "+%v\n", row.key)
-			pv, _ := json.Marshal(row.value)
-			fmt.Fprintf(db, "%s\n", pv)
-		case DelCmd:
-			fmt.Fprintf(db, "-%v\n", row.key)
+		select {
+		case <-suspend:
+			resume <- true
+		case row := <-persists:
+			switch row.command {
+			case SetCmd:
+				pv, _ := json.Marshal(row.value)
+				fmt.Fprintf(db, "+%v\n%s\n", row.key, pv)
+			case DumpCmd:
+				fmt.Fprintf(db, "*\n%s\n", Configuration)
+			case DelCmd:
+				fmt.Fprintf(db, "-%v\n", row.key)
+			}
 		}
 	}
 }

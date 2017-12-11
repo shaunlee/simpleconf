@@ -72,3 +72,7 @@ Post any of raw JSON body
 #### Clone values between key path
 
 `POST /clone/{from.key.path}/{to.key.path}`
+
+#### Rewrite appendonly database file
+
+`POST /rewriteaof`
