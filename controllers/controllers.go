@@ -2,24 +2,24 @@ package controllers
 
 import (
 	"github.com/kataras/iris"
-	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/models"
 )
 
 func whole(ctx iris.Context) {
 	ctx.ContentType("application/json")
-	ctx.WriteString(db.Configuration)
+	ctx.WriteString(models.Configuration)
 }
 
 func single(ctx iris.Context) {
 	ctx.ContentType("application/json")
-	ctx.WriteString(db.Get(ctx.Params().Get("key")))
+	ctx.WriteString(models.Get(ctx.Params().Get("key")))
 }
 
 func update(ctx iris.Context) {
 	var v interface{}
 	ctx.ReadJSON(&v)
 
-	db.Set(ctx.Params().Get("key"), v)
+	models.Set(ctx.Params().Get("key"), v)
 
 	ctx.JSON(iris.Map{
 		"ok": true,
@@ -27,7 +27,7 @@ func update(ctx iris.Context) {
 }
 
 func forget(ctx iris.Context) {
-	db.Del(ctx.Params().Get("key"))
+	models.Del(ctx.Params().Get("key"))
 
 	ctx.JSON(iris.Map{
 		"ok": true,
@@ -35,7 +35,7 @@ func forget(ctx iris.Context) {
 }
 
 func clone(ctx iris.Context) {
-	db.Clone(
+	models.Clone(
 		ctx.Params().Get("from_key"),
 		ctx.Params().Get("to_key"),
 	)

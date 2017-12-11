@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"github.com/shaunlee/simpleconf/controllers"
-	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/models"
 	"log"
 )
 
@@ -15,8 +15,8 @@ func main() {
 	flag.Parse()
 
 	log.Println("init db ...")
-	db.InitDb(dbfile)
-	defer db.FreeDb()
+	models.InitDb(dbfile)
+	defer models.FreeDb()
 
 	controllers.Route(listen)
 }
