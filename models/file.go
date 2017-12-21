@@ -2,7 +2,10 @@ package models
 
 import (
 	"fmt"
+	"github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Cmd uint8
 
@@ -14,13 +17,13 @@ const (
 
 type persistable struct {
 	command Cmd
-	key string
-	value interface{}
+	key     string
+	value   interface{}
 }
 
 var (
-	suspend = make(chan bool)
-	resume = make(chan bool)
+	suspend  = make(chan bool)
+	resume   = make(chan bool)
 	persists = make(chan *persistable, 100)
 )
 

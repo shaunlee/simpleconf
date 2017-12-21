@@ -1,17 +1,22 @@
 # simpleconf
 
-Most simple way to read write configuration.
+Simple way to read write configuration in a cluster, without single point of failure(SPOF).
 
 ## usage
 
 ```bash
 ./simpleconf
 
-  -db string
-        Appendonly database filename (default "data.aof")
-  -listen string
-        Http server address listen on (default ":3000")
+  --ignore-peers true
+        ignore peers as of first node starting, default is false
 ```
+
+## config.yml
+
+- db: appendonly database file
+- listen: frontend endpoint
+- peers.listen: endpoint of data synchronization
+- peers.addresses: cluster's peer nodes
 
 ## example
 

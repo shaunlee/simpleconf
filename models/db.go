@@ -2,15 +2,13 @@ package models
 
 import (
 	"bufio"
-	"github.com/json-iterator/go"
-	"github.com/shaunlee/simpleconf/helpers"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"github.com/shaunlee/simpleconf/helpers"
 	"os"
 )
 
 var (
-	json          = jsoniter.ConfigCompatibleWithStandardLibrary
 	dbfilename    string
 	db            *os.File
 	Configuration = "{}"
@@ -101,7 +99,7 @@ func reopen() {
 func erase() {
 	FreeDb()
 
-	os.Rename(dbfilename, dbfilename + ".bak")
+	os.Rename(dbfilename, dbfilename+".bak")
 
 	reopen()
 }

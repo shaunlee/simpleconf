@@ -3,6 +3,7 @@ package controllers
 import (
 	"github.com/kataras/iris"
 	"github.com/shaunlee/simpleconf/models"
+	"github.com/shaunlee/simpleconf/peers"
 )
 
 func whole(ctx iris.Context) {
@@ -19,7 +20,10 @@ func update(ctx iris.Context) {
 	var v interface{}
 	ctx.ReadJSON(&v)
 
-	models.Set(ctx.Params().Get("key"), v)
+	k := ctx.Params().Get("key")
+
+	peers.SyncUpdate(k, v)
+	models.Set(k, v)
 
 	ctx.JSON(iris.Map{
 		"ok": true,
@@ -27,7 +31,10 @@ func update(ctx iris.Context) {
 }
 
 func forget(ctx iris.Context) {
-	models.Del(ctx.Params().Get("key"))
+	k := ctx.Params().Get("key")
+
+	peers.SyncDelete(k)
+	models.Del(k)
 
 	ctx.JSON(iris.Map{
 		"ok": true,
@@ -35,10 +42,11 @@ func forget(ctx iris.Context) {
 }
 
 func clone(ctx iris.Context) {
-	models.Clone(
-		ctx.Params().Get("from_key"),
-		ctx.Params().Get("to_key"),
-	)
+	fk := ctx.Params().Get("from_key")
+	tk := ctx.Params().Get("to_key")
+
+	peers.SyncClone(fk, tk)
+	models.Clone(fk, tk)
 
 	ctx.JSON(iris.Map{
 		"ok": true,
@@ -46,6 +54,7 @@ func clone(ctx iris.Context) {
 }
 
 func rewrite_aof(ctx iris.Context) {
+	peers.SyncRewriteAof()
 	models.RewriteAof()
 
 	ctx.JSON(iris.Map{
@@ -53,7 +62,7 @@ func rewrite_aof(ctx iris.Context) {
 	})
 }
 
-func Route(addr string) {
+func Listen(addr string) {
 	app := iris.New()
 
 	app.Get("/db", whole)
