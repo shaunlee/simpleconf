@@ -1,4 +1,5 @@
 simpleconf
+benchmarks
 *.aof
 *.bak
 *.sw*

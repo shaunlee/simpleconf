@@ -65,6 +65,10 @@ func rewrite_aof(ctx iris.Context) {
 func Listen(addr string) {
 	app := iris.New()
 
+	app.Get("/", func(ctx iris.Context) {
+		ctx.WriteString("simpleconf: v0.2.1-beta")
+	})
+
 	app.Get("/db", whole)
 	app.Get("/db/{key}", single)
 	app.Post("/db/{key}", update)
