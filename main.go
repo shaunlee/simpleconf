@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"github.com/shaunlee/simpleconf/controllers"
 	"github.com/shaunlee/simpleconf/models"
 	"github.com/shaunlee/simpleconf/peers"
@@ -10,10 +9,6 @@ import (
 )
 
 func main() {
-	var ignorePeers bool
-	flag.BoolVar(&ignorePeers, "ignore-peers", false, "ignore peers as of first node starting")
-	flag.Parse()
-
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
 	viper.SetConfigType("yaml")
@@ -23,9 +18,7 @@ func main() {
 	models.InitDb(viper.GetString("db"))
 	defer models.FreeDb()
 
-	if err := peers.Restore(viper.GetStringSlice("peers.addresses")); err != nil && !ignorePeers {
-		log.Fatal(err)
-	}
+	peers.Restore(viper.GetStringSlice("peers.addresses"))
 
 	go peers.Listen(
 		viper.GetString("peers.listen"),

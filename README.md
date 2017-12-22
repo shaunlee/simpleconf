@@ -2,15 +2,6 @@
 
 Simple way to read write configuration in a cluster, without single point of failure(SPOF).
 
-## usage
-
-```bash
-./simpleconf
-
-  --ignore-peers true
-        ignore peers as of first node starting, default is false
-```
-
 ## config.yml
 
 - db: appendonly database file

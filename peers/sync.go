@@ -1,16 +1,15 @@
 package peers
 
 import (
-	"errors"
 	"github.com/parnurzeal/gorequest"
 	"github.com/shaunlee/simpleconf/models"
 	"log"
 	"time"
 )
 
-func Restore(peers []string) error {
+func Restore(peers []string) {
 	if len(peers) == 0 {
-		return nil
+		return
 	}
 
 	for _, addr := range peers {
@@ -27,11 +26,9 @@ func Restore(peers []string) error {
 
 			models.Configuration = body
 			models.RewriteAof()
-			return nil
+			break
 		}
 	}
-
-	return errors.New("There is no valid peer to be restore from")
 }
 
 func SyncUpdate(key string, value interface{}) {
