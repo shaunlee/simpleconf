@@ -66,7 +66,7 @@ func Listen(addr string) {
 	app := iris.New()
 
 	app.Get("/", func(ctx iris.Context) {
-		ctx.WriteString("simpleconf: v0.2.1-beta")
+		ctx.WriteString("simpleconf: v0.2.2-beta")
 	})
 
 	app.Get("/db", whole)
