@@ -50,7 +50,20 @@ BenchmarkDel-4      20000000           107 ns/op
 BenchmarkClone-4     2000000           769 ns/op
 ```
 
-wrk write to 2 nodes
+wrk read from 1 node
+
+```
+Running 10s test @ http://127.0.0.1:3001/db/bench
+  2 threads and 10 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   426.75us    0.97ms  13.59ms   91.42%
+    Req/Sec    39.48k     4.79k   53.95k    67.50%
+  786578 requests in 10.01s, 105.02MB read
+Requests/sec:  78548.95
+Transfer/sec:     10.49MB
+```
+
+wrk write to a 2 nodes healthy cluster
 
 ```
 Running 10s test @ http://127.0.0.1:3001/db/bench
@@ -63,17 +76,17 @@ Requests/sec:   5027.95
 Transfer/sec:    657.95KB
 ```
 
-wrk read from 1 node
+wrk write to a 2 nodes cluster in case of 1 node failure
 
 ```
-Running 10s test @ http://127.0.0.1:3001/db/bench
+Running 10s test @ http://127.0.0.1:3002/db/bench
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   426.75us    0.97ms  13.59ms   91.42%
-    Req/Sec    39.48k     4.79k   53.95k    67.50%
-  786578 requests in 10.01s, 105.02MB read
-Requests/sec:  78548.95
-Transfer/sec:     10.49MB
+    Latency     7.81ms   10.08ms  75.32ms   82.84%
+    Req/Sec     1.36k   399.10     2.31k    67.50%
+  27026 requests in 10.02s, 3.45MB read
+Requests/sec:   2696.30
+Transfer/sec:    352.84KB
 ```
 
 ## interfaces
