@@ -16,7 +16,7 @@ const (
 type persistable struct {
 	command Cmd
 	key     string
-	value   interface{}
+	value   any
 }
 
 var (

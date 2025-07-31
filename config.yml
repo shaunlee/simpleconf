@@ -1,4 +1,4 @@
-db: data.aof
+db: data/data.aof
 listen: :3000
 peers:
   listen: :9000

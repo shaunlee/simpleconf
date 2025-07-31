@@ -42,43 +42,30 @@ BenchmarkDel-16     11882312    98.36 ns/op
 BenchmarkClone-16   3532437     340.1 ns/op
 ```
 
-wrk read from 1 node
+wrk read
 
 ```
-Running 10s test @ http://127.0.0.1:3001/db/bench
+Running 10s test @ http://127.0.0.1:3000/db
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   426.75us    0.97ms  13.59ms   91.42%
-    Req/Sec    39.48k     4.79k   53.95k    67.50%
-  786578 requests in 10.01s, 105.02MB read
-Requests/sec:  78548.95
-Transfer/sec:     10.49MB
+    Latency    40.02us   13.04us   2.34ms   79.62%
+    Req/Sec   103.13k     4.05k  110.66k    65.35%
+  2072219 requests in 10.10s, 310.27MB read
+Requests/sec: 205173.65
+Transfer/sec:     30.72MB
 ```
 
-wrk write to a 2 nodes healthy cluster
+wrk write
 
 ```
-Running 10s test @ http://127.0.0.1:3001/db/bench
+Running 10s test @ http://127.0.0.1:3000/db/bench
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency     2.16ms    1.55ms  23.35ms   85.99%
-    Req/Sec     2.53k   146.17     2.96k    69.50%
-  50289 requests in 10.00s, 6.43MB read
-Requests/sec:   5027.95
-Transfer/sec:    657.95KB
-```
-
-wrk write to a 2 nodes cluster in case of 1 node failure
-
-```
-Running 10s test @ http://127.0.0.1:3002/db/bench
-  2 threads and 10 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency     7.81ms   10.08ms  75.32ms   82.84%
-    Req/Sec     1.36k   399.10     2.31k    67.50%
-  27026 requests in 10.02s, 3.45MB read
-Requests/sec:   2696.30
-Transfer/sec:    352.84KB
+    Latency    57.63us   24.61us 839.00us   89.99%
+    Req/Sec    77.99k     1.84k   83.63k    70.30%
+  1567237 requests in 10.10s, 186.83MB read
+Requests/sec: 155171.47
+Transfer/sec:     18.50MB
 ```
 
 ## interfaces

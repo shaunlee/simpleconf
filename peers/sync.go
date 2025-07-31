@@ -31,7 +31,7 @@ func Restore(peers []string) {
 	}
 }
 
-func SyncUpdate(key string, value interface{}) {
+func SyncUpdate(key string, value any) {
 	for _, addr := range peers {
 		url := addr + "/db/" + key
 		v, _ := json.Marshal(value)
