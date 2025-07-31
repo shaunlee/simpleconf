@@ -10,20 +10,20 @@ Simple way to read write configuration in a cluster, without single point of fai
 ## example
 
 ```bash
-echo '2017' | http http://localhost/db/product.year
-echo '"Demo"' | http http://localhost/db/product.name
-echo 'false' | http http://localhost/db/product.is_expired
+echo '2017' | http http://localhost:23456/db/product.year
+echo '"Demo"' | http http://localhost:23456/db/product.name
+echo 'false' | http http://localhost:23456/db/product.is_expired
 
-http http://localhost/db/product
+http http://localhost:23456/db/product
 {
     "is_expired": false, 
     "name": "Demo", 
     "year": 2017
 }
 
-http delete http://localhost/db/product.is_expired
+http delete http://localhost:23456/db/product.is_expired
 
-http http://localhost/db/product
+http http://localhost:23456/db/product
 {
     "name": "Demo", 
     "year": 2017
@@ -43,7 +43,7 @@ BenchmarkClone-16   3532437     340.1 ns/op
 wrk read
 
 ```
-Running 10s test @ http://127.0.0.1:3000/db
+Running 10s test @ http://127.0.0.1:23456/db
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
     Latency    40.02us   13.04us   2.34ms   79.62%
@@ -56,7 +56,7 @@ Transfer/sec:     30.72MB
 wrk write
 
 ```
-Running 10s test @ http://127.0.0.1:3000/db/bench
+Running 10s test @ http://127.0.0.1:23456/db/bench
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
     Latency    57.63us   24.61us 839.00us   89.99%
