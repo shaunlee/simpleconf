@@ -1,5 +1,6 @@
 simpleconf
 benchmarks
+go.sum
 *.aof
 *.bak
 *.sw*
