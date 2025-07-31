@@ -8,6 +8,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -81,8 +82,8 @@ func RewriteAof() {
 	persists <- &persistable{dumpCmd, "", nil}
 }
 
-func Init(dbfile string) {
-	dbfn = dbfile
+func Init(dir string) {
+	dbfn = filepath.Join(dir, "data.aof")
 
 	reopen()
 

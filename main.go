@@ -18,7 +18,7 @@ func main() {
 	viper.ReadInConfig()
 
 	log.Println("init db ...")
-	db.Init(viper.GetString("db"))
+	db.Init(viper.GetString("db.dir"))
 	defer db.Close(true)
 
 	//peers.Restore(viper.GetStringSlice("peers.addresses"))
