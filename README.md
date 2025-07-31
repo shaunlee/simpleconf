@@ -35,10 +35,11 @@ http http://localhost/db/product
 ## benchmarks
 
 ```
-BenchmarkGet-4      30000000           50.7 ns/op
-BenchmarkSet-4      10000000           201 ns/op
-BenchmarkDel-4      20000000           107 ns/op
-BenchmarkClone-4     2000000           769 ns/op
+cpu: AMD Ryzen 9 5900HX with Radeon Graphics
+BenchmarkGet-16     35693421	32.31 ns/op
+BenchmarkSet-16     8923850	    134.5 ns/op
+BenchmarkDel-16     11882312    98.36 ns/op
+BenchmarkClone-16   3532437	    340.1 ns/op
 ```
 
 wrk read from 1 node
