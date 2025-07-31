@@ -36,10 +36,10 @@ http http://localhost/db/product
 
 ```
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkGet-16     35693421	32.31 ns/op
-BenchmarkSet-16     8923850	    134.5 ns/op
+BenchmarkGet-16     35693421    32.31 ns/op
+BenchmarkSet-16     8923850     134.5 ns/op
 BenchmarkDel-16     11882312    98.36 ns/op
-BenchmarkClone-16   3532437	    340.1 ns/op
+BenchmarkClone-16   3532437     340.1 ns/op
 ```
 
 wrk read from 1 node
