@@ -59,7 +59,7 @@ func Route() *fiber.App {
 	app.Use(recover.New())
 
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("simpleconf: v0.2.2-beta")
+		return c.SendString("simpleconf: v0.3.0-beta")
 	})
 
 	app.Get("/db", whole)
