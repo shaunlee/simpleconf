@@ -19,7 +19,7 @@ func main() {
 
 	log.Println("init db ...")
 	db.Init(viper.GetString("db"))
-	defer db.Close()
+	defer db.Close(true)
 
 	//peers.Restore(viper.GetStringSlice("peers.addresses"))
 

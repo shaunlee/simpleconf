@@ -130,9 +130,11 @@ func erase() {
 	reopen()
 }
 
-func Close() {
+func Close(exit ...bool) {
 	if db != nil {
-		wg.Wait()
+		if len(exit) > 0 && exit[0] {
+			wg.Wait()
+		}
 		db.Close()
 		db = nil
 	}
