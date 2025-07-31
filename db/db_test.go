@@ -1,12 +1,12 @@
-package models
+package db
 
 import "testing"
 
-const dbfile = "data.aof"
+//const dbfile = "test.aof"
 
 func BenchmarkGet(b *testing.B) {
-	InitDb(dbfile)
-	defer FreeDb()
+	//Init(dbfile)
+	//defer Close()
 
 	setonly("bench", "mark")
 	for i := 0; i < b.N; i++ {
@@ -15,8 +15,8 @@ func BenchmarkGet(b *testing.B) {
 }
 
 func BenchmarkSet(b *testing.B) {
-	InitDb(dbfile)
-	defer FreeDb()
+	//Init(dbfile)
+	//defer Close()
 
 	for i := 0; i < b.N; i++ {
 		setonly("bench", "mark")
@@ -24,8 +24,8 @@ func BenchmarkSet(b *testing.B) {
 }
 
 func BenchmarkDel(b *testing.B) {
-	InitDb(dbfile)
-	defer FreeDb()
+	//Init(dbfile)
+	//defer Close()
 
 	for i := 0; i < b.N; i++ {
 		delonly("bench")
@@ -33,8 +33,8 @@ func BenchmarkDel(b *testing.B) {
 }
 
 func BenchmarkClone(b *testing.B) {
-	InitDb(dbfile)
-	defer FreeDb()
+	//Init(dbfile)
+	//defer Close()
 
 	setonly("bench", "mark")
 	for i := 0; i < b.N; i++ {

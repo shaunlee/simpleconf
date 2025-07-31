@@ -1,6 +1,2 @@
 db: data/data.aof
 listen: :3000
-peers:
-  listen: :9000
-  addresses:
-    - http://127.0.0.1:9001

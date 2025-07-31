@@ -1,4 +1,4 @@
-package helpers
+package utils
 
 import (
 	"bufio"
@@ -13,7 +13,7 @@ func Readline(reader *bufio.Reader) []byte {
 	}
 }
 
-func Bytes2Obj(s []byte) any {
+func Bytes2Any(s []byte) any {
 	var v any
 	if err := json.Unmarshal(s, &v); err != nil {
 		return nil

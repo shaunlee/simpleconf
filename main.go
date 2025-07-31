@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/shaunlee/simpleconf/controllers"
-	"github.com/shaunlee/simpleconf/models"
+	"github.com/shaunlee/simpleconf/actions"
+	"github.com/shaunlee/simpleconf/db"
 	//"github.com/shaunlee/simpleconf/peers"
 	"github.com/spf13/viper"
 	"log"
@@ -18,8 +18,8 @@ func main() {
 	viper.ReadInConfig()
 
 	log.Println("init db ...")
-	models.InitDb(viper.GetString("db"))
-	defer models.FreeDb()
+	db.Init(viper.GetString("db"))
+	defer db.Close()
 
 	//peers.Restore(viper.GetStringSlice("peers.addresses"))
 
@@ -28,7 +28,7 @@ func main() {
 	//	viper.GetStringSlice("peers.addresses"),
 	//)
 
-	app := controllers.Route()
+	app := actions.Route()
 
 	go func() {
 		ch := make(chan os.Signal, 1)
