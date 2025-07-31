@@ -13,8 +13,8 @@ func Readline(reader *bufio.Reader) []byte {
 	}
 }
 
-func Bytes2Obj(s []byte) interface{} {
-	var v interface{}
+func Bytes2Obj(s []byte) any {
+	var v any
 	if err := json.Unmarshal(s, &v); err != nil {
 		return nil
 	} else {

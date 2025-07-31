@@ -2,9 +2,9 @@ package models
 
 import (
 	"bufio"
+	"github.com/shaunlee/simpleconf/helpers"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
-	"github.com/shaunlee/simpleconf/helpers"
 	"os"
 )
 
@@ -14,11 +14,11 @@ var (
 	Configuration = "{}"
 )
 
-func setonly(k string, v interface{}) {
+func setonly(k string, v any) {
 	Configuration, _ = sjson.Set(Configuration, k, v)
 }
 
-func Set(k string, v interface{}) {
+func Set(k string, v any) {
 	setonly(k, v)
 
 	persists <- &persistable{SetCmd, k, v}

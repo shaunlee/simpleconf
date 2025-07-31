@@ -1,80 +1,73 @@
 package controllers
 
 import (
-	"github.com/kataras/iris"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/shaunlee/simpleconf/helpers"
 	"github.com/shaunlee/simpleconf/models"
-	"github.com/shaunlee/simpleconf/peers"
+	//"github.com/shaunlee/simpleconf/peers"
 )
 
-func whole(ctx iris.Context) {
-	ctx.ContentType("application/json")
-	ctx.WriteString(models.Configuration)
+func whole(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	return c.SendString(models.Configuration)
 }
 
-func single(ctx iris.Context) {
-	ctx.ContentType("application/json")
-	ctx.WriteString(models.Get(ctx.Params().Get("key")))
+func single(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
+	return c.SendString(models.Get(c.Params("key")))
 }
 
-func update(ctx iris.Context) {
-	var v interface{}
-	ctx.ReadJSON(&v)
+func update(c *fiber.Ctx) error {
+	k := c.Params("key")
+	v := helpers.Bytes2Obj(c.Body())
 
-	k := ctx.Params().Get("key")
-
-	peers.SyncUpdate(k, v)
+	//peers.SyncUpdate(k, v)
 	models.Set(k, v)
 
-	ctx.JSON(iris.Map{
-		"ok": true,
-	})
+	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func forget(ctx iris.Context) {
-	k := ctx.Params().Get("key")
+func forget(c *fiber.Ctx) error {
+	k := c.Params("key")
 
-	peers.SyncDelete(k)
+	//peers.SyncDelete(k)
 	models.Del(k)
 
-	ctx.JSON(iris.Map{
-		"ok": true,
-	})
+	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func clone(ctx iris.Context) {
-	fk := ctx.Params().Get("from_key")
-	tk := ctx.Params().Get("to_key")
+func clone(c *fiber.Ctx) error {
+	fk := c.Params("from_key")
+	tk := c.Params("to_key")
 
-	peers.SyncClone(fk, tk)
+	//peers.SyncClone(fk, tk)
 	models.Clone(fk, tk)
 
-	ctx.JSON(iris.Map{
-		"ok": true,
-	})
+	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func rewrite_aof(ctx iris.Context) {
-	peers.SyncRewriteAof()
+func rewriteAof(c *fiber.Ctx) error {
+	//peers.SyncRewriteAof()
 	models.RewriteAof()
 
-	ctx.JSON(iris.Map{
-		"ok": true,
-	})
+	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func Listen(addr string) {
-	app := iris.New()
+func Route() *fiber.App {
+	app := fiber.New()
+	app.Use(recover.New())
 
-	app.Get("/", func(ctx iris.Context) {
-		ctx.WriteString("simpleconf: v0.2.2-beta")
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.SendString("simpleconf: v0.2.2-beta")
 	})
 
 	app.Get("/db", whole)
-	app.Get("/db/{key}", single)
-	app.Post("/db/{key}", update)
-	app.Delete("/db/{key}", forget)
-	app.Post("/clone/{from_key}/{to_key}", clone)
-	app.Post("/rewriteaof", rewrite_aof)
+	app.Get("/db/:key", single)
+	app.Post("/db/:key", update)
+	app.Delete("/db/:key", forget)
+	app.Post("/clone/:from_key/:to_key", clone)
+	app.Post("/rewriteaof", rewriteAof)
 
-	app.Run(iris.Addr(addr))
+	return app
 }

@@ -2,7 +2,8 @@ package peers
 
 import (
 	"github.com/goccy/go-json"
-	"github.com/kataras/iris"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/shaunlee/simpleconf/models"
 )
 
@@ -10,47 +11,39 @@ var (
 	peers []string
 )
 
-func whole(ctx iris.Context) {
-	ctx.ContentType("application/json")
+func whole(c *fiber.Ctx) error {
+	c.Set("Content-Type", "application/json")
 	ctx.WriteString(models.Configuration)
 }
 
-func update(ctx iris.Context) {
-	var v interface{}
+func update(c *fiber.Ctx) error {
+	var v any
 	ctx.ReadJSON(&v)
 
 	models.Set(ctx.Params().Get("key"), v)
 
-	ctx.JSON(iris.Map{
-		"ok": true,
-	})
+	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func forget(ctx iris.Context) {
+func forget(c *fiber.Ctx) error {
 	models.Del(ctx.Params().Get("key"))
 
-	ctx.JSON(iris.Map{
-		"ok": true,
-	})
+	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func clone(ctx iris.Context) {
+func clone(c *fiber.Ctx) error {
 	models.Clone(
 		ctx.Params().Get("from_key"),
 		ctx.Params().Get("to_key"),
 	)
 
-	ctx.JSON(iris.Map{
-		"ok": true,
-	})
+	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func rewrite_aof(ctx iris.Context) {
+func rewriteAof(c *fiber.Ctx) error {
 	models.RewriteAof()
 
-	ctx.JSON(iris.Map{
-		"ok": true,
-	})
+	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
 func Listen(addr string, peerAddrs []string) {
@@ -62,7 +55,7 @@ func Listen(addr string, peerAddrs []string) {
 	app.Post("/db/{key}", update)
 	app.Delete("/db/{key}", forget)
 	app.Post("/clone/{from_key}/{to_key}", clone)
-	app.Post("/rewriteaof", rewrite_aof)
+	app.Post("/rewriteaof", rewriteAof)
 
 	app.Run(iris.Addr(addr))
 }
