@@ -1,13 +1,12 @@
 package peers
 
 import (
-	"github.com/json-iterator/go"
+	"github.com/goccy/go-json"
 	"github.com/kataras/iris"
 	"github.com/shaunlee/simpleconf/models"
 )
 
 var (
-	json  = jsoniter.ConfigCompatibleWithStandardLibrary
 	peers []string
 )
 

@@ -2,10 +2,8 @@ package helpers
 
 import (
 	"bufio"
-	"github.com/json-iterator/go"
+	"github.com/goccy/go-json"
 )
-
-var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 func Readline(reader *bufio.Reader) []byte {
 	if line, err := reader.ReadBytes('\n'); err != nil {

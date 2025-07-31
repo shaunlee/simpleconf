@@ -3,7 +3,7 @@ module github.com/shaunlee/simpleconf
 go 1.24.5
 
 require (
-	github.com/json-iterator/go v1.1.12
+	github.com/goccy/go-json v0.10.5
 	github.com/kataras/iris v0.0.2
 	github.com/parnurzeal/gorequest v0.3.0
 	github.com/spf13/viper v1.20.1
@@ -30,6 +30,7 @@ require (
 	github.com/iris-contrib/jade v1.1.4 // indirect
 	github.com/iris-contrib/pongo2 v0.0.1 // indirect
 	github.com/iris-contrib/schema v0.0.6 // indirect
+	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kataras/blocks v0.0.8 // indirect
 	github.com/kataras/golog v0.1.11 // indirect
 	github.com/kataras/iris/v12 v12.2.11 // indirect

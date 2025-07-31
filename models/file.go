@@ -2,10 +2,8 @@ package models
 
 import (
 	"fmt"
-	"github.com/json-iterator/go"
+	"github.com/goccy/go-json"
 )
-
-var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Cmd uint8
 
