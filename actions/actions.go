@@ -55,7 +55,9 @@ func rewriteAof(c *fiber.Ctx) error {
 }
 
 func Route() *fiber.App {
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		DisableStartupMessage: true,
+	})
 	app.Use(recover.New())
 
 	app.Get("/", func(c *fiber.Ctx) error {
