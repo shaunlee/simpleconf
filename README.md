@@ -6,8 +6,6 @@ Simple way to read write configuration in a cluster, without single point of fai
 
 - db: appendonly database file
 - listen: frontend endpoint
-- peers.listen: endpoint of data synchronization
-- peers.addresses: cluster's peer nodes
 
 ## example
 
