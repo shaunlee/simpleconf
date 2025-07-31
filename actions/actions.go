@@ -61,7 +61,10 @@ func Route() *fiber.App {
 	app.Use(recover.New())
 
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("simpleconf: v0.3.0-beta")
+		return c.JSON(fiber.Map{
+			"role":    "master",
+			"version": "v0.3.0-beta",
+		})
 	})
 
 	app.Get("/db", whole)

@@ -15,9 +15,10 @@ func main() {
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
 	viper.SetConfigType("yaml")
+	viper.SetDefault("listen", ":23456")
+	viper.SetDefault("db.dir", "/data")
 	viper.ReadInConfig()
 
-	log.Println("init db ...")
 	db.Init(viper.GetString("db.dir"))
 	defer db.Close(true)
 

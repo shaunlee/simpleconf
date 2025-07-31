@@ -7,6 +7,7 @@ import (
 	"github.com/shaunlee/simpleconf/utils"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -83,6 +84,7 @@ func RewriteAof() {
 }
 
 func Init(dir string) {
+	log.Println("init db ...")
 	dbfn = filepath.Join(dir, "data.aof")
 
 	reopen()
@@ -134,6 +136,7 @@ func erase() {
 func Close(exit ...bool) {
 	if db != nil {
 		if len(exit) > 0 && exit[0] {
+			log.Println("closing db ...")
 			wg.Wait()
 		}
 		db.Close()
