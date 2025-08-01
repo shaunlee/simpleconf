@@ -69,7 +69,7 @@ func Route() *fiber.App {
 
 	app.Get("/db", whole)
 	app.Get("/db/:key", single)
-	app.Post("/db/:key", update)
+	app.Put("/db/:key", update)
 	app.Delete("/db/:key", forget)
 	app.Post("/clone/:from_key/:to_key", clone)
 	app.Post("/rewriteaof", rewriteAof)

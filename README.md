@@ -82,9 +82,9 @@ Returns raw JSON, use key path as fine-grained as possible
 
 #### Set values by key path
 
-`POST /db/{key.path}`
+`PUT /db/{key.path}`
 
-Post any of raw JSON body
+Put any of raw JSON body
 
 #### Delete values key path
 
