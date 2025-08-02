@@ -38,6 +38,6 @@ func BenchmarkClone(b *testing.B) {
 
 	setonly("bench", "mark")
 	for i := 0; i < b.N; i++ {
-		cponly("bench", "mark")
+		Clone("bench", "mark")
 	}
 }

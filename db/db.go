@@ -64,14 +64,9 @@ func Get(k string) string {
 	return gjson.Get(Configuration, k).Raw
 }
 
-func cponly(fk, tk string) {
-	v := Get(fk)
-	setonly(tk, utils.Bytes2Any([]byte(v)))
-}
-
 func Clone(fk, tk string) {
-	v := Get(fk)
-	Set(tk, utils.Bytes2Any([]byte(v)))
+	v := gjson.Get(Configuration, fk).Raw
+	Configuration, _ = sjson.SetRaw(Configuration, tk, v)
 }
 
 func RewriteAof() {
