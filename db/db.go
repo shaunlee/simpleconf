@@ -96,19 +96,17 @@ func Init(dir string) {
 
 		switch kl[0] {
 		case '+':
-			vl := readline(reader)
-			if vl == nil {
+			if vl := readline(reader); vl == nil {
 				break
+			} else {
+				Configuration, _ = sjson.SetRaw(Configuration, string(kl[1:]), string(vl))
 			}
-
-			Configuration, _ = sjson.SetRaw(Configuration, string(kl[1:]), string(vl))
 		case '*':
-			vl := readline(reader)
-			if vl == nil {
+			if vl := readline(reader); vl == nil {
 				break
+			} else {
+				Configuration = string(vl)
 			}
-
-			Configuration = string(vl)
 		case '-':
 			delonly(string(kl[1:]))
 		}
