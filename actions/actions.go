@@ -1,10 +1,10 @@
 package actions
 
 import (
+	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/shaunlee/simpleconf/db"
-	"github.com/shaunlee/simpleconf/utils"
 )
 
 func whole(c *fiber.Ctx) error {
@@ -18,10 +18,15 @@ func single(c *fiber.Ctx) error {
 }
 
 func update(c *fiber.Ctx) error {
+	var v any
+	if err := json.Unmarshal(c.Body(), &v); err != nil {
+		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
+	}
 	k := c.Params("key")
-	v := utils.Bytes2Any(c.Body())
 
-	db.Set(k, v)
+	if err := db.Set(k, v); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }

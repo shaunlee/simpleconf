@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/goccy/go-json"
-	"github.com/shaunlee/simpleconf/utils"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"log"
@@ -38,15 +37,19 @@ var (
 	persists = make(chan *persistable, 100)
 )
 
-func setonly(k string, v any) {
-	Configuration, _ = sjson.Set(Configuration, k, v)
+func setonly(k string, v any) (err error) {
+	Configuration, err = sjson.Set(Configuration, k, v)
+	return
 }
 
-func Set(k string, v any) {
-	setonly(k, v)
+func Set(k string, v any) error {
+	if err := setonly(k, v); err != nil {
+		return err
+	}
 
 	wg.Add(1)
 	persists <- &persistable{setCmd, k, v}
+	return nil
 }
 
 func delonly(k string) {
@@ -86,21 +89,21 @@ func Init(dir string) {
 
 	reader := bufio.NewReader(db)
 	for {
-		kl := utils.Readline(reader)
+		kl := readline(reader)
 		if kl == nil {
 			break
 		}
 
 		switch kl[0] {
 		case '+':
-			vl := utils.Readline(reader)
+			vl := readline(reader)
 			if vl == nil {
 				break
 			}
 
-			setonly(string(kl[1:]), utils.Bytes2Any(vl))
+			Configuration, _ = sjson.SetRaw(Configuration, string(kl[1:]), string(vl))
 		case '*':
-			vl := utils.Readline(reader)
+			vl := readline(reader)
 			if vl == nil {
 				break
 			}
@@ -158,5 +161,13 @@ func persist() {
 				wg.Done()
 			}
 		}
+	}
+}
+
+func readline(reader *bufio.Reader) []byte {
+	if line, err := reader.ReadBytes('\n'); err != nil {
+		return nil
+	} else {
+		return line[:len(line)-1]
 	}
 }
