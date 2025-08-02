@@ -34,10 +34,10 @@ http http://localhost:23456/db/product
 
 ```
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkGet-16     35693421    32.31 ns/op
-BenchmarkSet-16     8923850     134.5 ns/op
-BenchmarkDel-16     11882312    98.36 ns/op
-BenchmarkClone-16   3532437     340.1 ns/op
+BenchmarkGet-16      	35865764	        31.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet-16      	 7825952	       153.1 ns/op	      96 B/op	       3 allocs/op
+BenchmarkDel-16      	12272269	        96.00 ns/op	      80 B/op	       3 allocs/op
+BenchmarkClone-16    	 5811598	       205.7 ns/op	     168 B/op	       4 allocs/op
 ```
 
 wrk read
