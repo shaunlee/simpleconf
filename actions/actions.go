@@ -5,7 +5,6 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/shaunlee/simpleconf/db"
 	"github.com/shaunlee/simpleconf/utils"
-	//"github.com/shaunlee/simpleconf/peers"
 )
 
 func whole(c *fiber.Ctx) error {
@@ -22,7 +21,6 @@ func update(c *fiber.Ctx) error {
 	k := c.Params("key")
 	v := utils.Bytes2Any(c.Body())
 
-	//peers.SyncUpdate(k, v)
 	db.Set(k, v)
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
@@ -31,7 +29,6 @@ func update(c *fiber.Ctx) error {
 func forget(c *fiber.Ctx) error {
 	k := c.Params("key")
 
-	//peers.SyncDelete(k)
 	db.Del(k)
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
@@ -41,14 +38,12 @@ func clone(c *fiber.Ctx) error {
 	fk := c.Params("from_key")
 	tk := c.Params("to_key")
 
-	//peers.SyncClone(fk, tk)
 	db.Clone(fk, tk)
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
 func rewriteAof(c *fiber.Ctx) error {
-	//peers.SyncRewriteAof()
 	db.RewriteAof()
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})

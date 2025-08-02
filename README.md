@@ -1,6 +1,6 @@
 # simpleconf
 
-Simple way to read write configuration in a cluster, without single point of failure(SPOF).
+Simple way to read and write configurations in a cluster, without single point of failure(SPOF).
 
 ## config.yml
 
