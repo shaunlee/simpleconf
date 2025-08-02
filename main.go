@@ -17,6 +17,7 @@ func main() {
 	viper.SetConfigType("yaml")
 	viper.SetDefault("listen", ":23456")
 	viper.SetDefault("db.dir", "/data")
+	viper.AutomaticEnv()
 	viper.ReadInConfig()
 
 	db.Init(viper.GetString("db.dir"))
