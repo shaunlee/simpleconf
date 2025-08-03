@@ -42,10 +42,10 @@ BenchmarkClone-16    	 5811598	       205.7 ns/op	     168 B/op	       4 allocs/
 
 ```
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkTcpGet-16      	  202935	      5271 ns/op
-BenchmarkTcpSet-16      	  227640	      5764 ns/op
-BenchmarkTcpDel-16      	  195621	      5723 ns/op
-BenchmarkTcpClone-16    	  220393	      5961 ns/op
+BenchmarkTcpGet-16      	  225938	      5208 ns/op
+BenchmarkTcpSet-16      	  259856	      5751 ns/op
+BenchmarkTcpDel-16      	  219106	      5647 ns/op
+BenchmarkTcpClone-16    	  218146	      5597 ns/op
 ```
 
 wrk read
