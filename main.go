@@ -39,11 +39,14 @@ func main() {
 	defer app.Shutdown()
 
 	tcpApp := server.New()
-	go func() {
-		if err := tcpApp.Listen(viper.GetString("tcp.listen")); err != nil {
-			log.Panic(err)
-		}
-	}()
+	tcpaddr := viper.GetString("tcp.listen")
+	if len(tcpaddr) > 0 {
+		go func() {
+			if err := tcpApp.Listen(tcpaddr); err != nil {
+				log.Panic(err)
+			}
+		}()
+	}
 	defer tcpApp.Shutdown()
 
 	ch := make(chan os.Signal, 1)
