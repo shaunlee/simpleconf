@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	conn net.Conn
+	conn   net.Conn
 	reader *bufio.Reader
 )
 

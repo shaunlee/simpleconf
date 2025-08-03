@@ -16,11 +16,17 @@ func main() {
 	viper.AddConfigPath(".")
 	viper.SetConfigType("yaml")
 	viper.SetDefault("listen", ":23456")
-	viper.SetDefault("db.dir", "/data")
 	viper.AutomaticEnv()
 	viper.ReadInConfig()
 
-	db.Init(viper.GetString("db.dir"))
+	dbdir := viper.GetString("db_dir")
+	if len(dbdir) == 0 {
+		dbdir = viper.GetString("db.dir")
+	}
+	if len(dbdir) == 0 {
+		dbdir = "/data"
+	}
+	db.Init(dbdir)
 	defer db.Close(true)
 
 	//peers.Restore(viper.GetStringSlice("peers.addresses"))
@@ -39,8 +45,12 @@ func main() {
 	defer app.Shutdown()
 
 	tcpApp := server.New()
-	tcpaddr := viper.GetString("tcp.listen")
+	tcpaddr := viper.GetString("tcp_listen")
+	if len(tcpaddr) == 0 {
+		tcpaddr = viper.GetString("tcp.listen")
+	}
 	if len(tcpaddr) > 0 {
+		log.Println("tcp server listening on", tcpaddr)
 		go func() {
 			if err := tcpApp.Listen(tcpaddr); err != nil {
 				log.Panic(err)
@@ -49,6 +59,7 @@ func main() {
 	}
 	defer tcpApp.Shutdown()
 
+	log.Println("http server listening on", viper.GetString("listen"))
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	<-ch
