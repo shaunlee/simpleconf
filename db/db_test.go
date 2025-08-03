@@ -27,6 +27,7 @@ func BenchmarkDel(b *testing.B) {
 	//Init(dbfile)
 	//defer Close()
 
+	setonly("bench", "mark")
 	for i := 0; i < b.N; i++ {
 		delonly("bench")
 	}
