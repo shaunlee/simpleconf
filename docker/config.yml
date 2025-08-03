@@ -1,3 +1,5 @@
 db:
   dir: /data
 listen: :23456
+tcp:
+  listen: :23466

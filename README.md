@@ -96,7 +96,7 @@ Put any of raw JSON body
 
 #### Rewrite appendonly database file
 
-`POST /rewriteaof`
+`POST /vacuum`
 
 ## License 
 

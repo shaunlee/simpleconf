@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/shaunlee/simpleconf/actions"
 	"github.com/shaunlee/simpleconf/db"
-	//"github.com/shaunlee/simpleconf/peers"
+	"github.com/shaunlee/simpleconf/server"
 	"github.com/spf13/viper"
 	"log"
 	"os"
@@ -30,16 +30,23 @@ func main() {
 	//	viper.GetStringSlice("peers.addresses"),
 	//)
 
-	app := actions.Route()
-
+	app := actions.New()
 	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		<-ch
-		app.Shutdown()
+		if err := app.Listen(viper.GetString("listen")); err != nil {
+			log.Panic(err)
+		}
 	}()
+	defer app.Shutdown()
 
-	if err := app.Listen(viper.GetString("listen")); err != nil {
-		log.Println(err)
-	}
+	tcpApp := server.New()
+	go func() {
+		if err := tcpApp.Listen(viper.GetString("tcp.listen")); err != nil {
+			log.Panic(err)
+		}
+	}()
+	defer tcpApp.Shutdown()
+
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	<-ch
 }

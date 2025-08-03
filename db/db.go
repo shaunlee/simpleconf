@@ -72,7 +72,7 @@ func Clone(fk, tk string) {
 	Configuration, _ = sjson.SetRaw(Configuration, tk, v)
 }
 
-func RewriteAof() {
+func Vacuum() {
 	suspend <- struct{}{}
 	erase()
 	resume <- struct{}{}

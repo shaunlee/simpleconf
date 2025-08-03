@@ -25,7 +25,7 @@ func Restore(peers []string) {
 			}
 
 			models.Configuration = body
-			models.RewriteAof()
+			models.Vacuum()
 			break
 		}
 	}
@@ -71,9 +71,9 @@ func SyncClone(fromKey, toKey string) {
 	}
 }
 
-func SyncRewriteAof() {
+func SyncVacuum() {
 	for _, addr := range peers {
-		url := addr + "/rewriteaof"
+		url := addr + "/vacuum"
 		if resp, _, err := (gorequest.New().Timeout(2 * time.Second)).Post(url).End(); err != nil {
 			log.Println("failed to sync", url, err)
 		} else {

@@ -40,8 +40,8 @@ func clone(c *fiber.Ctx) error {
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func rewriteAof(c *fiber.Ctx) error {
-	models.RewriteAof()
+func vacuum(c *fiber.Ctx) error {
+	models.Vacuum()
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
@@ -55,7 +55,7 @@ func Listen(addr string, peerAddrs []string) {
 	app.Post("/db/{key}", update)
 	app.Delete("/db/{key}", forget)
 	app.Post("/clone/{from_key}/{to_key}", clone)
-	app.Post("/rewriteaof", rewriteAof)
+	app.Post("/vacuum", vacuum)
 
 	app.Run(iris.Addr(addr))
 }
