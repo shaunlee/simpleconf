@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/goccy/go-json"
 	"github.com/shaunlee/simpleconf/db"
 	"net"
 )
@@ -40,31 +41,80 @@ func (p *Server) handle(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	for !p.exit {
-		if l, err := reader.ReadBytes('\n'); err != nil {
+		if l, err := readline(reader); err != nil {
 			break
+		} else if len(l) == 0 {
+			continue
 		} else {
-			l = bytes.TrimSpace(l)
-			if len(l) == 0 {
-				continue
-			}
 			switch l[0] {
 			case '=':
 				if len(l) == 1 {
-					fmt.Fprintf(conn, "%s\n", db.Configuration)
+					fmt.Fprintf(conn, "$%d\n%s\n", len(db.Configuration), db.Configuration)
 				} else {
-					fmt.Fprintf(conn, "%s\n", db.Get(string(l[1:])))
+					k := string(l[1:])
+					val := db.Get(k)
+					fmt.Fprintf(conn, "$%d\n%s\n", len(val), val)
 				}
 			case '+':
-				//
-			case '*':
-				//
+				if len(l) == 1 {
+					fmt.Fprintf(conn, "-ERR the key path is required\n")
+				} else if nl, err := readline(reader); err != nil {
+					break
+				} else {
+					k := string(l[1:])
+					var v any
+					if err := json.Unmarshal(nl, &v); err != nil {
+						fmt.Fprintf(conn, "-ERR %s\n", err.Error())
+					} else if err := db.Set(k, v); err != nil {
+						fmt.Fprintf(conn, "-ERR %s\n", err.Error())
+					} else {
+						fmt.Fprintf(conn, "+OK\n")
+					}
+				}
 			case '-':
-				db.Del(string(l[1:]))
-				fmt.Fprintf(conn, "ok\n")
+				if len(l) == 1 {
+					fmt.Fprintf(conn, "-ERR the key path is required\n")
+				} else {
+					k := string(l[1:])
+					db.Del(k)
+					fmt.Fprintf(conn, "+OK\n")
+				}
 			case '<':
-				//
-				//VACUUM
+				if len(l) == 1 {
+					fmt.Fprintf(conn, "-ERR the source key path is required\n")
+				} else if nl, err := readline(reader); err != nil {
+					break
+				} else if len(nl) <= 1 || nl[0] != '>' {
+					fmt.Fprintf(conn, "-ERR the target key path is required\n")
+				} else {
+					fk := string(l[1:])
+					tk := string(nl[1:])
+					db.Clone(fk, tk)
+					fmt.Fprintf(conn, "+OK\n")
+				}
+			case '*':
+				db.Vacuum()
+				fmt.Fprintf(conn, "+OK\n")
+			case 'p':
+				fallthrough
+			case 'P':
+				if bytes.EqualFold(l, []byte("PING")) {
+					fmt.Fprintf(conn, "+PONG\n")
+					continue
+				}
+				fallthrough
+			default:
+				fmt.Fprintf(conn, "-ERR unknown command\n")
 			}
 		}
+	}
+	fmt.Println("bye!!!")
+}
+
+func readline(reader *bufio.Reader) ([]byte, error) {
+	if line, err := reader.ReadBytes('\n'); err != nil {
+		return nil, err
+	} else {
+		return bytes.TrimSpace(line), nil
 	}
 }
