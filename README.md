@@ -78,6 +78,7 @@ Transfer/sec:     18.50MB
 
 #### Get whole configurations
 
+HTTP:
 `GET /db`
 
 TCP:
@@ -87,6 +88,7 @@ Returns raw JSON, in case of dump the database, don't use it often
 
 #### Get values with key path
 
+HTTP:
 `GET /db/{key.path}`
 
 TCP:
@@ -96,6 +98,7 @@ Returns raw JSON, use key path as fine-grained as possible
 
 #### Set values by key path
 
+HTTP:
 `PUT /db/{key.path} {"name": "Demo"}`
 
 TCP:
@@ -115,6 +118,7 @@ TCP:
 
 #### Clone values between key path
 
+HTTP:
 `POST /clone/{from.key.path}/{to.key.path}`
 
 TCP:
@@ -125,6 +129,7 @@ TCP:
 
 #### Rewrite appendonly database file
 
+HTTP:
 `POST /vacuum`
 
 TCP:
