@@ -88,12 +88,12 @@ Returns raw JSON, use key path as fine-grained as possible
 
 #### Set values by key path
 
-`PUT /db/{key.path} {"name": "Shaun"}`
+`PUT /db/{key.path} {"name": "Demo"}`
 
 TCP:
 ```
 +key.path
-{"name": "Shaun"}
+{"name": "Demo"}
 ```
 
 Put any of raw JSON body
