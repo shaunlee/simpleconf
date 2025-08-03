@@ -72,17 +72,29 @@ Transfer/sec:     18.50MB
 
 `GET /db`
 
+TCP:
+`=`
+
 Returns raw JSON, in case of dump the database, don't use it often
 
 #### Get values with key path
 
 `GET /db/{key.path}`
 
+TCP:
+`=key.path`
+
 Returns raw JSON, use key path as fine-grained as possible
 
 #### Set values by key path
 
-`PUT /db/{key.path}`
+`PUT /db/{key.path} {"name": "Shaun"}`
+
+TCP:
+```
++key.path
+{"name": "Shaun"}
+```
 
 Put any of raw JSON body
 
@@ -90,13 +102,29 @@ Put any of raw JSON body
 
 `DELETE /db/{key.path}`
 
+TCP:
+`-key.path`
+
 #### Clone values between key path
 
 `POST /clone/{from.key.path}/{to.key.path}`
 
+TCP:
+```
+<from.key.path
+>to.key.path
+```
+
 #### Rewrite appendonly database file
 
 `POST /vacuum`
+
+TCP:
+`*`
+
+#### TCP ping
+
+`PING`
 
 ## License 
 
