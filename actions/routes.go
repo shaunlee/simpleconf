@@ -1,6 +1,7 @@
 package actions
 
 import (
+	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
@@ -8,6 +9,8 @@ import (
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
+		JSONEncoder:           json.Marshal,
+		JSONDecoder:           json.Unmarshal,
 	})
 	app.Use(recover.New())
 
