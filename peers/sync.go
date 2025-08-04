@@ -2,7 +2,7 @@ package peers
 
 import (
 	"github.com/parnurzeal/gorequest"
-	"github.com/shaunlee/simpleconf/models"
+	"github.com/shaunlee/simpleconf/db"
 	"log"
 	"time"
 )
@@ -24,8 +24,8 @@ func Restore(peers []string) {
 				continue
 			}
 
-			models.Configuration = body
-			models.Vacuum()
+			db.Configuration = body
+			db.Vacuum()
 			break
 		}
 	}

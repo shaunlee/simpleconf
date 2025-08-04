@@ -4,7 +4,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/shaunlee/simpleconf/models"
+	"github.com/shaunlee/simpleconf/db"
 )
 
 var (
@@ -13,26 +13,26 @@ var (
 
 func whole(c *fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	ctx.WriteString(models.Configuration)
+	ctx.WriteString(db.Configuration)
 }
 
 func update(c *fiber.Ctx) error {
 	var v any
 	ctx.ReadJSON(&v)
 
-	models.Set(ctx.Params().Get("key"), v)
+	db.Set(ctx.Params().Get("key"), v)
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
 func forget(c *fiber.Ctx) error {
-	models.Del(ctx.Params().Get("key"))
+	db.Del(ctx.Params().Get("key"))
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
 func clone(c *fiber.Ctx) error {
-	models.Clone(
+	db.Clone(
 		ctx.Params().Get("from_key"),
 		ctx.Params().Get("to_key"),
 	)
@@ -41,7 +41,7 @@ func clone(c *fiber.Ctx) error {
 }
 
 func vacuum(c *fiber.Ctx) error {
-	models.Vacuum()
+	db.Vacuum()
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
