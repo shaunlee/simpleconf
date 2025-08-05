@@ -95,9 +95,7 @@ func (p *Server) handle(conn net.Conn) {
 			case '*':
 				db.Vacuum()
 				fmt.Fprintf(conn, "+OK\n")
-			case 'p':
-				fallthrough
-			case 'P':
+			case 'p', 'P':
 				if bytes.EqualFold(l, []byte("PING")) {
 					fmt.Fprintf(conn, "+PONG\n")
 					continue
