@@ -111,6 +111,7 @@ func Init(dir string) {
 			delonly(string(kl[1:]))
 		}
 	}
+	log.Println("db loaded")
 
 	go persist()
 }
