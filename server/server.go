@@ -7,9 +7,11 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/shaunlee/simpleconf/db"
 	"net"
+	"sync"
 )
 
 type Server struct {
+	wg   sync.WaitGroup
 	exit bool
 }
 
@@ -28,8 +30,10 @@ func (p *Server) Listen(addr string) error {
 		if err != nil {
 			return err
 		}
+		p.wg.Add(1)
 		go p.handle(conn)
 	}
+	p.wg.Wait()
 	return nil
 }
 
@@ -38,8 +42,10 @@ func (p *Server) Shutdown() {
 }
 
 func (p *Server) handle(conn net.Conn) {
+	defer p.wg.Done()
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
+	writer := bufio.NewWriter(conn)
 	for !p.exit {
 		if l, err := readline(reader); err != nil {
 			break
@@ -49,61 +55,92 @@ func (p *Server) handle(conn net.Conn) {
 			switch l[0] {
 			case '=':
 				if len(l) == 1 {
-					fmt.Fprintf(conn, "$%d\n%s\n", len(db.Configuration), db.Configuration)
+					if _, err := writer.WriteString(fmt.Sprintf("$%d\n%s\n", len(db.Configuration), db.Configuration)); err != nil {
+						break
+					}
 				} else {
 					k := string(l[1:])
 					val := db.Get(k)
-					fmt.Fprintf(conn, "$%d\n%s\n", len(val), val)
+					if _, err := writer.WriteString(fmt.Sprintf("$%d\n%s\n", len(val), val)); err != nil {
+						break
+					}
 				}
 			case '+':
 				if len(l) == 1 {
-					fmt.Fprintf(conn, "-ERR the key path is required\n")
+					if _, err := writer.WriteString("-ERR the key path is required\n"); err != nil {
+						break
+					}
 				} else if nl, err := readline(reader); err != nil {
 					break
 				} else {
 					k := string(l[1:])
 					var v any
 					if err := json.Unmarshal(nl, &v); err != nil {
-						fmt.Fprintf(conn, "-ERR %s\n", err.Error())
+						if _, err := writer.WriteString(fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
+							break
+						}
 					} else if err := db.Set(k, v); err != nil {
-						fmt.Fprintf(conn, "-ERR %s\n", err.Error())
+						if _, err := writer.WriteString(fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
+							break
+						}
 					} else {
-						fmt.Fprintf(conn, "+OK\n")
+						if _, err := writer.WriteString("+OK\n"); err != nil {
+							break
+						}
 					}
 				}
 			case '-':
 				if len(l) == 1 {
-					fmt.Fprintf(conn, "-ERR the key path is required\n")
+					if _, err := writer.WriteString("-ERR the key path is required\n"); err != nil {
+						break
+					}
 				} else {
 					k := string(l[1:])
 					db.Del(k)
-					fmt.Fprintf(conn, "+OK\n")
+					if _, err := writer.WriteString("+OK\n"); err != nil {
+						break
+					}
 				}
 			case '<':
 				if len(l) == 1 {
-					fmt.Fprintf(conn, "-ERR the source key path is required\n")
+					if _, err := writer.WriteString("-ERR the source key path is required\n"); err != nil {
+						break
+					}
 				} else if nl, err := readline(reader); err != nil {
 					break
 				} else if len(nl) <= 1 || nl[0] != '>' {
-					fmt.Fprintf(conn, "-ERR the target key path is required\n")
+					if _, err := writer.WriteString("-ERR the target key path is required\n"); err != nil {
+						break
+					}
 				} else {
 					fk := string(l[1:])
 					tk := string(nl[1:])
 					db.Clone(fk, tk)
-					fmt.Fprintf(conn, "+OK\n")
+					if _, err := writer.WriteString("+OK\n"); err != nil {
+						break
+					}
 				}
 			case '*':
 				db.Vacuum()
-				fmt.Fprintf(conn, "+OK\n")
+				if _, err := writer.WriteString("+OK\n"); err != nil {
+					break
+				}
 			case 'p', 'P':
 				if bytes.EqualFold(l, []byte("PING")) {
-					fmt.Fprintf(conn, "+PONG\n")
+					if _, err := writer.WriteString("+PONG\n"); err != nil {
+						break
+					}
 					continue
 				}
 				fallthrough
 			default:
-				fmt.Fprintf(conn, "-ERR unknown command\n")
+				if _, err := writer.WriteString("-ERR unknown command\n"); err != nil {
+					break
+				}
 			}
+		}
+		if err := writer.Flush(); err != nil {
+			break
 		}
 	}
 }
