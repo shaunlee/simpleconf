@@ -9,32 +9,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
-)
-
-type persistable struct {
-	command cmd
-	key     string
-	value   any
-}
-
-type cmd uint8
-
-const (
-	setCmd = cmd(iota)
-	delCmd
-	dumpCmd
 )
 
 var (
 	dbfn          string
 	db            *os.File
 	Configuration = "{}"
-
-	wg       sync.WaitGroup
-	suspend  = make(chan struct{})
-	resume   = make(chan struct{})
-	persists = make(chan *persistable, 100)
 )
 
 func setonly(k string, v any) (err error) {
@@ -47,8 +27,8 @@ func Set(k string, v any) error {
 		return err
 	}
 
-	wg.Add(1)
-	persists <- &persistable{setCmd, k, v}
+	pv, _ := json.Marshal(v)
+	fmt.Fprintf(db, "+%s\n%s\n", k, pv)
 	return nil
 }
 
@@ -59,8 +39,7 @@ func delonly(k string) {
 func Del(k string) {
 	delonly(k)
 
-	wg.Add(1)
-	persists <- &persistable{delCmd, k, nil}
+	fmt.Fprintf(db, "-%s\n", k)
 }
 
 func Get(k string) string {
@@ -73,12 +52,9 @@ func Clone(fk, tk string) {
 }
 
 func Vacuum() {
-	suspend <- struct{}{}
 	erase()
-	resume <- struct{}{}
 
-	wg.Add(1)
-	persists <- &persistable{dumpCmd, "", nil}
+	fmt.Fprintf(db, "*\n%s\n", Configuration)
 }
 
 func Init(dir string) {
@@ -112,8 +88,6 @@ func Init(dir string) {
 		}
 	}
 	log.Println("db loaded")
-
-	go persist()
 }
 
 func reopen() {
@@ -132,34 +106,8 @@ func erase() {
 
 func Close(exit ...bool) {
 	if db != nil {
-		if len(exit) > 0 && exit[0] {
-			log.Println("closing db ...")
-			wg.Wait()
-		}
 		db.Close()
 		db = nil
-	}
-}
-
-func persist() {
-	for {
-		select {
-		case <-suspend:
-			<-resume
-		case row := <-persists:
-			switch row.command {
-			case setCmd:
-				pv, _ := json.Marshal(row.value)
-				fmt.Fprintf(db, "+%s\n%s\n", row.key, pv)
-				wg.Done()
-			case delCmd:
-				fmt.Fprintf(db, "-%s\n", row.key)
-				wg.Done()
-			case dumpCmd:
-				fmt.Fprintf(db, "*\n%s\n", Configuration)
-				wg.Done()
-			}
-		}
 	}
 }
 

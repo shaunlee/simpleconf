@@ -48,30 +48,43 @@ BenchmarkTcpDel-16      	  263331	      5299 ns/op
 BenchmarkTcpClone-16    	  223882	      5059 ns/op
 ```
 
-wrk read
-
-```
-Running 10s test @ http://127.0.0.1:23456/db
-  2 threads and 10 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    40.02us   13.04us   2.34ms   79.62%
-    Req/Sec   103.13k     4.05k  110.66k    65.35%
-  2072219 requests in 10.10s, 310.27MB read
-Requests/sec: 205173.65
-Transfer/sec:     30.72MB
-```
-
-wrk write
+wrk get
 
 ```
 Running 10s test @ http://127.0.0.1:23456/db/bench
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    57.63us   24.61us 839.00us   89.99%
-    Req/Sec    77.99k     1.84k   83.63k    70.30%
-  1567237 requests in 10.10s, 186.83MB read
-Requests/sec: 155171.47
-Transfer/sec:     18.50MB
+    Latency    40.06us   10.91us 738.00us   76.41%
+    Req/Sec   104.03k     4.36k  113.08k    65.35%
+  2091039 requests in 10.10s, 295.14MB read
+Requests/sec: 207040.39
+Transfer/sec:     29.22MB
+```
+
+wrk set
+
+```
+Running 10s test @ http://127.0.0.1:23456/db/bench
+  2 threads and 10 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    66.40us   34.08us   1.21ms   90.89%
+    Req/Sec    72.18k     1.03k   75.19k    68.81%
+  1450633 requests in 10.10s, 172.93MB read
+Requests/sec: 143629.05
+Transfer/sec:     17.12MB
+```
+
+wrk delete
+
+```
+Running 10s test @ http://127.0.0.1:23456/db/bench
+  2 threads and 10 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    53.39us   41.82us   3.48ms   96.62%
+    Req/Sec    86.50k     2.24k   95.54k    69.00%
+  1721124 requests in 10.00s, 205.17MB read
+Requests/sec: 172110.01
+Transfer/sec:     20.52MB
 ```
 
 ## interfaces
