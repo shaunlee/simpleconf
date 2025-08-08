@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"net"
-	"testing"
 	"sync"
+	"testing"
 )
 
 var pool = sync.Pool{
 	New: func() any {
-		nc, _ := net.Dial("tcp", "127.0.0.1:23466")
+		nc, _ := net.Dial("tcp4", "127.0.0.1:23466")
 		return nc
 	},
 }

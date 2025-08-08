@@ -8,6 +8,7 @@ import (
 	"github.com/shaunlee/simpleconf/db"
 	"net"
 	"sync"
+	"time"
 )
 
 type Server struct {
@@ -20,16 +21,21 @@ func New() *Server {
 }
 
 func (p *Server) Listen(addr string) error {
-	lc, err := net.Listen("tcp", addr)
+	raddr, err := net.ResolveTCPAddr("tcp4", addr)
+	if err != nil {
+		return err
+	}
+	lc, err := net.ListenTCP("tcp4", raddr)
 	if err != nil {
 		return err
 	}
 	defer lc.Close()
 	for !p.exit {
-		conn, err := lc.Accept()
+		conn, err := lc.AcceptTCP()
 		if err != nil {
 			return err
 		}
+		conn.SetKeepAlivePeriod(10 * time.Second)
 		p.wg.Add(1)
 		go p.handle(conn)
 	}
@@ -143,6 +149,7 @@ func (p *Server) handle(conn net.Conn) {
 			break
 		}
 	}
+	fmt.Println("bye")
 }
 
 func readline(reader *bufio.Reader) ([]byte, error) {
