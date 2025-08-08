@@ -5,32 +5,29 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"sync"
 )
 
-var (
-	conn   net.Conn
-	reader *bufio.Reader
-)
-
-func init() {
-	nc, _ := net.Dial("tcp", "127.0.0.1:23466")
-	conn = nc
-	reader = bufio.NewReader(conn)
-
-	//fmt.Fprintf(conn, "+bench\n\"mark\"\n")
-	//v, _ := reader.ReadBytes('\n')
-	//fmt.Print(string(v))
-	//v, _ = reader.ReadBytes('\n')
-	//fmt.Print(string(v))
+var pool = sync.Pool{
+	New: func() any {
+		nc, _ := net.Dial("tcp", "127.0.0.1:23466")
+		return nc
+	},
 }
 
 func TestTcpSet(t *testing.T) {
+	conn := pool.Get().(net.Conn)
+	defer pool.Put(conn)
+	reader := bufio.NewReader(conn)
 	fmt.Fprintf(conn, "+bench\n\"mark\"\n")
 	v, _ := reader.ReadBytes('\n')
 	fmt.Print(string(v))
 }
 
 func BenchmarkTcpSet(b *testing.B) {
+	conn := pool.Get().(net.Conn)
+	defer pool.Put(conn)
+	reader := bufio.NewReader(conn)
 	for i := 0; i < b.N; i++ {
 		fmt.Fprintf(conn, "+bench\n\"mark\"\n")
 		reader.ReadBytes('\n')
@@ -38,6 +35,9 @@ func BenchmarkTcpSet(b *testing.B) {
 }
 
 func TestTcpGet(t *testing.T) {
+	conn := pool.Get().(net.Conn)
+	defer pool.Put(conn)
+	reader := bufio.NewReader(conn)
 	fmt.Fprintf(conn, "=\n")
 	v, _ := reader.ReadBytes('\n')
 	fmt.Print(string(v))
@@ -46,6 +46,9 @@ func TestTcpGet(t *testing.T) {
 }
 
 func BenchmarkTcpGet(b *testing.B) {
+	conn := pool.Get().(net.Conn)
+	defer pool.Put(conn)
+	reader := bufio.NewReader(conn)
 	for i := 0; i < b.N; i++ {
 		fmt.Fprintf(conn, "=bench\n")
 		reader.ReadBytes('\n')
@@ -54,12 +57,18 @@ func BenchmarkTcpGet(b *testing.B) {
 }
 
 func TestTcpClone(t *testing.T) {
+	conn := pool.Get().(net.Conn)
+	defer pool.Put(conn)
+	reader := bufio.NewReader(conn)
 	fmt.Fprintf(conn, "<bench\n>mark\n")
 	v, _ := reader.ReadBytes('\n')
 	fmt.Print(string(v))
 }
 
 func BenchmarkTcpClone(b *testing.B) {
+	conn := pool.Get().(net.Conn)
+	defer pool.Put(conn)
+	reader := bufio.NewReader(conn)
 	for i := 0; i < b.N; i++ {
 		fmt.Fprintf(conn, "<bench\n>mark\n")
 		reader.ReadBytes('\n')
@@ -67,12 +76,18 @@ func BenchmarkTcpClone(b *testing.B) {
 }
 
 func TestTcpDel(t *testing.T) {
+	conn := pool.Get().(net.Conn)
+	defer pool.Put(conn)
+	reader := bufio.NewReader(conn)
 	fmt.Fprintf(conn, "-bench\n")
 	v, _ := reader.ReadBytes('\n')
 	fmt.Print(string(v))
 }
 
 func BenchmarkTcpDel(b *testing.B) {
+	conn := pool.Get().(net.Conn)
+	defer pool.Put(conn)
+	reader := bufio.NewReader(conn)
 	for i := 0; i < b.N; i++ {
 		fmt.Fprintf(conn, "-bench\n")
 		reader.ReadBytes('\n')
