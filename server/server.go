@@ -149,7 +149,6 @@ func (p *Server) handle(conn net.Conn) {
 			break
 		}
 	}
-	fmt.Println("bye")
 }
 
 func readline(reader *bufio.Reader) ([]byte, error) {
