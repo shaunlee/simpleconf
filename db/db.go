@@ -48,9 +48,11 @@ func Get(k string) string {
 
 func Clone(fk, tk string) {
 	v := gjson.Get(Configuration, fk).Raw
-	Configuration, _ = sjson.SetRaw(Configuration, tk, v)
+	if len(v) > 0 {
+		Configuration, _ = sjson.SetRaw(Configuration, tk, v)
 
-	fmt.Fprintf(db, "+%s\n%s\n", tk, v)
+		fmt.Fprintf(db, "+%s\n%s\n", tk, v)
+	}
 }
 
 func Vacuum() {
