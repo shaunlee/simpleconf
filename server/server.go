@@ -7,9 +7,11 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/shaunlee/simpleconf/db"
 	"net"
+	"sync"
 )
 
 type Server struct {
+	wg   sync.WaitGroup
 	exit bool
 }
 
@@ -28,8 +30,10 @@ func (p *Server) Listen(addr string) error {
 		if err != nil {
 			return err
 		}
+		p.wg.Add(1)
 		go p.handle(conn)
 	}
+	p.wg.Wait()
 	return nil
 }
 
@@ -38,6 +42,7 @@ func (p *Server) Shutdown() {
 }
 
 func (p *Server) handle(conn net.Conn) {
+	defer p.wg.Done()
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
