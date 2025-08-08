@@ -61,19 +61,19 @@ func (p *Server) handle(conn net.Conn) {
 			switch l[0] {
 			case '=':
 				if len(l) == 1 {
-					if _, err := writer.WriteString(fmt.Sprintf("$%d\n%s\n", len(db.Configuration), db.Configuration)); err != nil {
+					if err := writelines(writer, fmt.Sprintf("$%d\n", len(db.Configuration)), fmt.Sprintf("%s\n", db.Configuration)); err != nil {
 						break
 					}
 				} else {
 					k := string(l[1:])
 					val := db.Get(k)
-					if _, err := writer.WriteString(fmt.Sprintf("$%d\n%s\n", len(val), val)); err != nil {
+					if err := writelines(writer, fmt.Sprintf("$%d\n", len(val)), fmt.Sprintf("%s\n", val)); err != nil {
 						break
 					}
 				}
 			case '+':
 				if len(l) == 1 {
-					if _, err := writer.WriteString("-ERR the key path is required\n"); err != nil {
+					if err := writelines(writer, "-ERR the key path is required\n"); err != nil {
 						break
 					}
 				} else if nl, err := readline(reader); err != nil {
@@ -82,65 +82,65 @@ func (p *Server) handle(conn net.Conn) {
 					k := string(l[1:])
 					var v any
 					if err := json.Unmarshal(nl, &v); err != nil {
-						if _, err := writer.WriteString(fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
+						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
 							break
 						}
 					} else if err := db.Set(k, v); err != nil {
-						if _, err := writer.WriteString(fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
+						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
 							break
 						}
 					} else {
-						if _, err := writer.WriteString("+OK\n"); err != nil {
+						if err := writelines(writer, "+OK\n"); err != nil {
 							break
 						}
 					}
 				}
 			case '-':
 				if len(l) == 1 {
-					if _, err := writer.WriteString("-ERR the key path is required\n"); err != nil {
+					if err := writelines(writer, "-ERR the key path is required\n"); err != nil {
 						break
 					}
 				} else {
 					k := string(l[1:])
 					db.Del(k)
-					if _, err := writer.WriteString("+OK\n"); err != nil {
+					if err := writelines(writer, "+OK\n"); err != nil {
 						break
 					}
 				}
 			case '<':
 				if len(l) == 1 {
-					if _, err := writer.WriteString("-ERR the source key path is required\n"); err != nil {
+					if err := writelines(writer, "-ERR the source key path is required\n"); err != nil {
 						break
 					}
 				} else if nl, err := readline(reader); err != nil {
 					break
 				} else if len(nl) <= 1 || nl[0] != '>' {
-					if _, err := writer.WriteString("-ERR the target key path is required\n"); err != nil {
+					if err := writelines(writer, "-ERR the target key path is required\n"); err != nil {
 						break
 					}
 				} else {
 					fk := string(l[1:])
 					tk := string(nl[1:])
 					db.Clone(fk, tk)
-					if _, err := writer.WriteString("+OK\n"); err != nil {
+					if err := writelines(writer, "+OK\n"); err != nil {
 						break
 					}
 				}
 			case '*':
 				db.Vacuum()
-				if _, err := writer.WriteString("+OK\n"); err != nil {
+				if err := writelines(writer, "+OK\n"); err != nil {
 					break
 				}
 			case 'p', 'P':
 				if bytes.EqualFold(l, []byte("PING")) {
-					if _, err := writer.WriteString("+PONG\n"); err != nil {
+					if err := writelines(writer, "+PONG\n"); err != nil {
 						break
 					}
 					continue
 				}
 				fallthrough
 			default:
-				if _, err := writer.WriteString("-ERR unknown command\n"); err != nil {
+				if err := writelines(writer, "-ERR unknown command\n"); err != nil {
 					break
 				}
 			}
@@ -157,4 +157,13 @@ func readline(reader *bufio.Reader) ([]byte, error) {
 	} else {
 		return bytes.TrimSpace(line), nil
 	}
+}
+
+func writelines(writer *bufio.Writer, lines ...string) error {
+	for _, l := range lines {
+		if _, err := writer.WriteString(l); err != nil {
+			break
+		}
+	}
+	return nil
 }
