@@ -8,7 +8,7 @@ import (
 
 func whole(c *fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	return c.SendString(db.Configuration)
+	return c.SendString(db.Get(""))
 }
 
 func single(c *fiber.Ctx) error {

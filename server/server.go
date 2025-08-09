@@ -60,16 +60,10 @@ func (p *Server) handle(conn net.Conn) {
 		} else {
 			switch l[0] {
 			case '=':
-				if len(l) == 1 {
-					if err := writelines(writer, fmt.Sprintf("$%d\n", len(db.Configuration)), fmt.Sprintf("%s\n", db.Configuration)); err != nil {
-						break
-					}
-				} else {
-					k := string(l[1:])
-					val := db.Get(k)
-					if err := writelines(writer, fmt.Sprintf("$%d\n", len(val)), fmt.Sprintf("%s\n", val)); err != nil {
-						break
-					}
+				k := string(l[1:])
+				val := db.Get(k)
+				if err := writelines(writer, fmt.Sprintf("$%d\n", len(val)), fmt.Sprintf("%s\n", val)); err != nil {
+					break
 				}
 			case '+':
 				if len(l) == 1 {

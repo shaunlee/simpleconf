@@ -13,7 +13,7 @@ var (
 
 func whole(c *fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	ctx.WriteString(db.Configuration)
+	ctx.WriteString(db.Get(""))
 }
 
 func update(c *fiber.Ctx) error {

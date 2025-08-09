@@ -9,16 +9,37 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
+)
+
+type persistable struct {
+	command cmd
+	key     string
+	value   any
+}
+
+type cmd uint8
+
+const (
+	setCmd = cmd(iota)
+	delCmd
+	dumpCmd
+	setRawCmd
 )
 
 var (
 	dbfn          string
 	db            *os.File
-	Configuration = "{}"
+	configuration = "{}"
+
+	wg       sync.WaitGroup
+	suspend  = make(chan struct{})
+	resume   = make(chan struct{})
+	persists = make(chan *persistable, 100)
 )
 
 func setonly(k string, v any) (err error) {
-	Configuration, err = sjson.Set(Configuration, k, v)
+	configuration, err = sjson.Set(configuration, k, v)
 	return
 }
 
@@ -27,38 +48,46 @@ func Set(k string, v any) error {
 		return err
 	}
 
-	pv, _ := json.Marshal(v)
-	fmt.Fprintf(db, "+%s\n%s\n", k, pv)
+	wg.Add(1)
+	persists <- &persistable{setCmd, k, v}
 	return nil
 }
 
 func delonly(k string) {
-	Configuration, _ = sjson.Delete(Configuration, k)
+	configuration, _ = sjson.Delete(configuration, k)
 }
 
 func Del(k string) {
 	delonly(k)
 
-	fmt.Fprintf(db, "-%s\n", k)
+	wg.Add(1)
+	persists <- &persistable{delCmd, k, nil}
 }
 
 func Get(k string) string {
-	return gjson.Get(Configuration, k).Raw
+	if len(k) == 0 {
+		return configuration
+	}
+	return gjson.Get(configuration, k).Raw
 }
 
 func Clone(fk, tk string) {
-	v := gjson.Get(Configuration, fk).Raw
+	v := gjson.Get(configuration, fk).Raw
 	if len(v) > 0 {
-		Configuration, _ = sjson.SetRaw(Configuration, tk, v)
+		configuration, _ = sjson.SetRaw(configuration, tk, v)
 
-		fmt.Fprintf(db, "+%s\n%s\n", tk, v)
+		wg.Add(1)
+		persists <- &persistable{setRawCmd, tk, v}
 	}
 }
 
 func Vacuum() {
+	suspend <- struct{}{}
 	erase()
+	resume <- struct{}{}
 
-	fmt.Fprintf(db, "*\n%s\n", Configuration)
+	wg.Add(1)
+	persists <- &persistable{dumpCmd, "", nil}
 }
 
 func Init(dir string) {
@@ -79,18 +108,20 @@ func Init(dir string) {
 			if vl := readline(reader); vl == nil {
 				break
 			} else {
-				Configuration, _ = sjson.SetRaw(Configuration, string(kl[1:]), string(vl))
+				configuration, _ = sjson.SetRaw(configuration, string(kl[1:]), string(vl))
 			}
 		case '*':
 			if vl := readline(reader); vl == nil {
 				break
 			} else {
-				Configuration = string(vl)
+				configuration = string(vl)
 			}
 		case '-':
 			delonly(string(kl[1:]))
 		}
 	}
+
+	go persist()
 	log.Println("db loaded")
 }
 
@@ -110,8 +141,34 @@ func erase() {
 
 func Close(exit ...bool) {
 	if db != nil {
+		if len(exit) > 0 && exit[0] {
+			log.Println("closing db ...")
+			wg.Wait()
+		}
 		db.Close()
 		db = nil
+	}
+}
+
+func persist() {
+	for {
+		select {
+		case <-suspend:
+			<-resume
+		case row := <-persists:
+			switch row.command {
+			case setCmd:
+				pv, _ := json.Marshal(row.value)
+				fmt.Fprintf(db, "+%s\n%s\n", row.key, pv)
+			case setRawCmd:
+				fmt.Fprintf(db, "+%s\n%s\n", row.key, row.value)
+			case delCmd:
+				fmt.Fprintf(db, "-%s\n", row.key)
+			case dumpCmd:
+				fmt.Fprintf(db, "*\n%s\n", configuration)
+			}
+			wg.Done()
+		}
 	}
 }
 
