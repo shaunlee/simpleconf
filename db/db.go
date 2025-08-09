@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type persistable struct {
@@ -134,7 +135,7 @@ func reopen() {
 func erase() {
 	Close()
 
-	os.Rename(dbfn, dbfn+".bak")
+	os.Rename(dbfn, dbfn+"."+time.Now().Format("060102150405"))
 
 	reopen()
 }
