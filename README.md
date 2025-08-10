@@ -38,9 +38,7 @@ BenchmarkGet-16      	35865764	       31.97 ns/op	       0 B/op	       0 allocs/
 BenchmarkSet-16      	 7825952	       153.1 ns/op	      96 B/op	       3 allocs/op
 BenchmarkDel-16      	12272269	       96.00 ns/op	      80 B/op	       3 allocs/op
 BenchmarkClone-16    	 5811598	       205.7 ns/op	     168 B/op	       4 allocs/op
-```
 
-```
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
 BenchmarkTcpSet-16      	   51232	     22851 ns/op
 BenchmarkTcpGet-16      	   61987	     19295 ns/op
@@ -48,32 +46,24 @@ BenchmarkTcpClone-16    	   53688	     22532 ns/op
 BenchmarkTcpDel-16      	   54684	     22070 ns/op
 ```
 
-TCP get
+TCP
 
 ```
-Running 10s test @ 127.0.0.1:23466
+Running 10s GET test @ 127.0.0.1:23466
   500 connections
   Stats		Avg		Min		Max
   Req/Sec	659.187µs	13.841777ms	17.172µs
   4928439 requests in 10.000008278s
 Requests/sec: 492843.59
-```
 
-TCP set
-
-```
-Running 10s test @ 127.0.0.1:23466
+Running 10s SET test @ 127.0.0.1:23466
   100 connections
   Stats		Avg		Min		Max
   Req/Sec	300.293µs	2.8153ms	18.214µs
   2874593 requests in 10.000167975s
 Requests/sec: 287454.47
-```
 
-TCP delete
-
-```
-Running 10s test @ 127.0.0.1:23466
+Running 10s DELETE test @ 127.0.0.1:23466
   100 connections
   Stats		Avg		Min		Max
   Req/Sec	237.16µs	3.515856ms	17.332µs
@@ -81,10 +71,10 @@ Running 10s test @ 127.0.0.1:23466
 Requests/sec: 339307.05
 ```
 
-wrk get
+wrk
 
 ```
-Running 10s test @ http://127.0.0.1:23456/db/bench
+Running 10s GET test @ http://127.0.0.1:23456/db/bench
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
     Latency    40.06us   10.91us 738.00us   76.41%
@@ -92,12 +82,8 @@ Running 10s test @ http://127.0.0.1:23456/db/bench
   2091039 requests in 10.10s, 295.14MB read
 Requests/sec: 207040.39
 Transfer/sec:     29.22MB
-```
 
-wrk set
-
-```
-Running 10s test @ http://127.0.0.1:23456/db/bench
+Running 10s SET test @ http://127.0.0.1:23456/db/bench
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
     Latency    66.40us   34.08us   1.21ms   90.89%
@@ -105,12 +91,8 @@ Running 10s test @ http://127.0.0.1:23456/db/bench
   1450633 requests in 10.10s, 172.93MB read
 Requests/sec: 143629.05
 Transfer/sec:     17.12MB
-```
 
-wrk delete
-
-```
-Running 10s test @ http://127.0.0.1:23456/db/bench
+Running 10s DELETE test @ http://127.0.0.1:23456/db/bench
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
     Latency    53.39us   41.82us   3.48ms   96.62%
