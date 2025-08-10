@@ -48,6 +48,39 @@ BenchmarkTcpClone-16    	   53688	     22532 ns/op
 BenchmarkTcpDel-16      	   54684	     22070 ns/op
 ```
 
+TCP get
+
+```
+Running 10s test @ 127.0.0.1:23466
+  500 connections
+  Stats		Avg		    Min		    Max
+  Req/Sec	694.377µs	14.294975ms	18.234µs
+  4698046 requests in 10.00040304s
+Requests/sec: 469786
+```
+
+TCP set
+
+```
+Running 10s test @ 127.0.0.1:23466
+  100 connections
+  Stats		Avg		    Min		    Max
+  Req/Sec	299.962µs	3.690967ms	17.052µs
+  2872866 requests in 10.000010006s
+Requests/sec: 287286
+```
+
+TCP delete
+
+```
+Running 10s test @ 127.0.0.1:23466
+  100 connections
+  Stats		Avg		Min		Max
+  Req/Sec	237.304µs	2.962674ms	16.852µs
+  3388646 requests in 10.000124375s
+Requests/sec: 338860
+```
+
 wrk get
 
 ```
