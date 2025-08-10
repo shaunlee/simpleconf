@@ -52,21 +52,21 @@ TCP
 Running 10s GET test @ 127.0.0.1:23466
   500 connections
   Stats		Avg		Min		Max
-  Req/Sec	659.187µs	13.841777ms	17.172µs
+  Latency	659.187µs	13.841777ms	17.172µs
   4928439 requests in 10.000008278s
 Requests/sec: 492843.59
 
 Running 10s SET test @ 127.0.0.1:23466
   100 connections
   Stats		Avg		Min		Max
-  Req/Sec	300.293µs	2.8153ms	18.214µs
+  Latency	300.293µs	2.8153ms	18.214µs
   2874593 requests in 10.000167975s
 Requests/sec: 287454.47
 
 Running 10s DELETE test @ 127.0.0.1:23466
   100 connections
   Stats		Avg		Min		Max
-  Req/Sec	237.16µs	3.515856ms	17.332µs
+  Latency	237.16µs	3.515856ms	17.332µs
   3393076 requests in 10.000016297s
 Requests/sec: 339307.05
 ```
