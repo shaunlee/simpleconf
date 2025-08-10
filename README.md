@@ -4,7 +4,7 @@ Simple way to read and write configurations in a cluster, without single point o
 
 ## config.yml
 
-- db: appendonly database file
+- db.dir: appendonly database file folder
 - listen: frontend endpoint
 
 ## example
