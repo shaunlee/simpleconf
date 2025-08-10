@@ -53,10 +53,10 @@ TCP get
 ```
 Running 10s test @ 127.0.0.1:23466
   500 connections
-  Stats		Avg		    Min		    Max
-  Req/Sec	694.377µs	14.294975ms	18.234µs
-  4698046 requests in 10.00040304s
-Requests/sec: 469786
+  Stats		Avg		Min		Max
+  Req/Sec	659.187µs	13.841777ms	17.172µs
+  4928439 requests in 10.000008278s
+Requests/sec: 492843.59
 ```
 
 TCP set
@@ -64,10 +64,10 @@ TCP set
 ```
 Running 10s test @ 127.0.0.1:23466
   100 connections
-  Stats		Avg		    Min		    Max
-  Req/Sec	299.962µs	3.690967ms	17.052µs
-  2872866 requests in 10.000010006s
-Requests/sec: 287286
+  Stats		Avg		Min		Max
+  Req/Sec	300.293µs	2.8153ms	18.214µs
+  2874593 requests in 10.000167975s
+Requests/sec: 287454.47
 ```
 
 TCP delete
@@ -76,9 +76,9 @@ TCP delete
 Running 10s test @ 127.0.0.1:23466
   100 connections
   Stats		Avg		Min		Max
-  Req/Sec	237.304µs	2.962674ms	16.852µs
-  3388646 requests in 10.000124375s
-Requests/sec: 338860
+  Req/Sec	237.16µs	3.515856ms	17.332µs
+  3393076 requests in 10.000016297s
+Requests/sec: 339307.05
 ```
 
 wrk get
