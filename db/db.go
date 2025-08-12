@@ -145,6 +145,8 @@ func Close(exit ...bool) {
 		if len(exit) > 0 && exit[0] {
 			log.Println("closing db ...")
 			wg.Wait()
+			Vacuum()
+			wg.Wait()
 		}
 		db.Close()
 		db = nil
