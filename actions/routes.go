@@ -16,7 +16,7 @@ func New() *fiber.App {
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"role":    "master",
-			"version": "v0.3.0-beta",
+			"version": "v0.4.0-beta",
 		})
 	})
 
