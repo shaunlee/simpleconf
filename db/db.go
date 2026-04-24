@@ -32,6 +32,7 @@ var (
 	dbfn          string
 	db            *os.File
 	configuration = "{}"
+	configMu      sync.RWMutex
 
 	wg       sync.WaitGroup
 	suspend  = make(chan struct{})
@@ -40,6 +41,8 @@ var (
 )
 
 func setonly(k string, v any) (err error) {
+	configMu.Lock()
+	defer configMu.Unlock()
 	configuration, err = sjson.Set(configuration, k, v)
 	return
 }
@@ -55,6 +58,8 @@ func Set(k string, v any) error {
 }
 
 func delonly(k string) {
+	configMu.Lock()
+	defer configMu.Unlock()
 	configuration, _ = sjson.Delete(configuration, k)
 }
 
@@ -66,20 +71,39 @@ func Del(k string) {
 }
 
 func Get(k string) string {
+	configMu.RLock()
+	defer configMu.RUnlock()
+
 	if len(k) == 0 {
 		return configuration
 	}
 	return gjson.Get(configuration, k).Raw
 }
 
+func Replace(raw string) error {
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return err
+	}
+
+	configMu.Lock()
+	configuration = raw
+	configMu.Unlock()
+	return nil
+}
+
 func Clone(fk, tk string) {
+	configMu.Lock()
 	v := gjson.Get(configuration, fk).Raw
 	if len(v) > 0 {
 		configuration, _ = sjson.SetRaw(configuration, tk, v)
+		configMu.Unlock()
 
 		wg.Add(1)
 		persists <- &persistable{setRawCmd, tk, v}
+		return
 	}
+	configMu.Unlock()
 }
 
 func Vacuum() {
@@ -109,13 +133,17 @@ func Init(dir string) {
 			if vl := readline(reader); vl == nil {
 				break
 			} else {
+				configMu.Lock()
 				configuration, _ = sjson.SetRaw(configuration, string(kl[1:]), string(vl))
+				configMu.Unlock()
 			}
 		case '*':
 			if vl := readline(reader); vl == nil {
 				break
 			} else {
+				configMu.Lock()
 				configuration = string(vl)
+				configMu.Unlock()
 			}
 		case '-':
 			delonly(string(kl[1:]))
@@ -168,7 +196,9 @@ func persist() {
 			case delCmd:
 				fmt.Fprintf(db, "-%s\n", row.key)
 			case dumpCmd:
+				configMu.RLock()
 				fmt.Fprintf(db, "*\n%s\n", configuration)
+				configMu.RUnlock()
 			}
 			wg.Done()
 		}

@@ -2,20 +2,25 @@ package main
 
 import (
 	"github.com/shaunlee/simpleconf/actions"
+	"github.com/shaunlee/simpleconf/cluster"
 	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/peers"
 	"github.com/shaunlee/simpleconf/server"
 	"github.com/spf13/viper"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 )
 
 func main() {
 	viper.SetConfigName("config")
-	viper.AddConfigPath(".")
+	viper.AddConfigPath("configs")
 	viper.SetConfigType("yaml")
 	viper.SetDefault("listen", ":23456")
+	viper.SetDefault("raft.forward", true)
 	viper.AutomaticEnv()
 	viper.ReadInConfig()
 
@@ -29,12 +34,40 @@ func main() {
 	db.Init(dbdir)
 	defer db.Close(true)
 
-	//peers.Restore(viper.GetStringSlice("peers.addresses"))
+	raftEnabled := viper.GetBool("raft.enabled")
+	if !raftEnabled {
+		peers.SetWALDir(filepath.Join(dbdir, "peers-wal"))
+	}
 
-	//go peers.Listen(
-	//	viper.GetString("peers.listen"),
-	//	viper.GetStringSlice("peers.addresses"),
-	//)
+	raftManager, err := cluster.Start(cluster.Config{
+		Enabled:   raftEnabled,
+		Forward:   viper.GetBool("raft.forward"),
+		NodeID:    viper.GetString("raft.node_id"),
+		RaftAddr:  viper.GetString("raft.listen"),
+		HTTPAddr:  viper.GetString("raft.http_addr"),
+		Dir:       filepath.Join(dbdir, "raft"),
+		Bootstrap: viper.GetBool("raft.bootstrap"),
+		Peers:     parseRaftPeers(viper.GetStringSlice("raft.peers")),
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+	cluster.SetDefault(raftManager)
+	defer raftManager.Shutdown()
+
+	if !raftEnabled {
+		peerAddrs := viper.GetStringSlice("peers.addresses")
+		peers.Restore(peerAddrs)
+
+		peerListenAddr := viper.GetString("peers.listen")
+		if len(peerListenAddr) == 0 {
+			peerListenAddr = viper.GetString("peers_listen")
+		}
+		if len(peerListenAddr) > 0 {
+			log.Println("peer server listening on", peerListenAddr)
+			go peers.Listen(peerListenAddr, peerAddrs)
+		}
+	}
 
 	app := actions.New()
 	go func() {
@@ -63,4 +96,25 @@ func main() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	<-ch
+}
+
+func parseRaftPeers(raw []string) []cluster.Peer {
+	peers := make([]cluster.Peer, 0, len(raw))
+	for _, row := range raw {
+		row = strings.TrimSpace(row)
+		if len(row) == 0 {
+			continue
+		}
+		parts := strings.Split(row, ",")
+		if len(parts) < 3 {
+			log.Printf("ignored invalid raft peer row %q, expected id,raft_addr,http_addr", row)
+			continue
+		}
+		peers = append(peers, cluster.Peer{
+			ID:       strings.TrimSpace(parts[0]),
+			RaftAddr: strings.TrimSpace(parts[1]),
+			HTTPAddr: strings.TrimSpace(parts[2]),
+		})
+	}
+	return peers
 }

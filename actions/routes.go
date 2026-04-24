@@ -2,19 +2,18 @@ package actions
 
 import (
 	"github.com/goccy/go-json"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/recover"
 )
 
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{
-		DisableStartupMessage: true,
-		JSONEncoder:           json.Marshal,
-		JSONDecoder:           json.Unmarshal,
+		JSONEncoder: json.Marshal,
+		JSONDecoder: json.Unmarshal,
 	})
 	app.Use(recover.New())
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"role":    "master",
 			"version": "v0.3.0-beta",

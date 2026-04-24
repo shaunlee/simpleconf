@@ -2,60 +2,88 @@ package peers
 
 import (
 	"github.com/goccy/go-json"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/shaunlee/simpleconf/db"
+	"log"
+	"sync"
 )
 
 var (
-	peers []string
+	peers   []string
+	peersMu sync.RWMutex
 )
 
-func whole(c *fiber.Ctx) error {
+func whole(c fiber.Ctx) error {
 	c.Set("Content-Type", "application/json")
-	ctx.WriteString(db.Get(""))
+	return c.SendString(db.Get(""))
 }
 
-func update(c *fiber.Ctx) error {
+func update(c fiber.Ctx) error {
 	var v any
-	ctx.ReadJSON(&v)
-
-	db.Set(ctx.Params().Get("key"), v)
-
-	return c.Status(202).JSON(fiber.Map{"ok": true})
-}
-
-func forget(c *fiber.Ctx) error {
-	db.Del(ctx.Params().Get("key"))
+	if err := json.Unmarshal(c.Body(), &v); err != nil {
+		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
+	}
+	if err := db.Set(c.Params("key"), v); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func clone(c *fiber.Ctx) error {
+func forget(c fiber.Ctx) error {
+	db.Del(c.Params("key"))
+
+	return c.Status(202).JSON(fiber.Map{"ok": true})
+}
+
+func clone(c fiber.Ctx) error {
 	db.Clone(
-		ctx.Params().Get("from_key"),
-		ctx.Params().Get("to_key"),
+		c.Params("from_key"),
+		c.Params("to_key"),
 	)
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
-func vacuum(c *fiber.Ctx) error {
+func vacuum(c fiber.Ctx) error {
 	db.Vacuum()
 
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
 func Listen(addr string, peerAddrs []string) {
-	peers = peerAddrs
+	Configure(peerAddrs)
 
-	app := iris.New()
+	app := fiber.New(fiber.Config{
+		JSONEncoder: json.Marshal,
+		JSONDecoder: json.Unmarshal,
+	})
+	app.Use(recover.New())
 
 	app.Get("/db", whole)
-	app.Post("/db/{key}", update)
-	app.Delete("/db/{key}", forget)
-	app.Post("/clone/{from_key}/{to_key}", clone)
+	app.Put("/db/:key", update)
+	app.Delete("/db/:key", forget)
+	app.Post("/clone/:from_key/:to_key", clone)
 	app.Post("/vacuum", vacuum)
 
-	app.Run(iris.Addr(addr))
+	if err := app.Listen(addr); err != nil {
+		log.Panic(err)
+	}
+}
+
+func Configure(peerAddrs []string) {
+	copied := append([]string(nil), peerAddrs...)
+
+	peersMu.Lock()
+	peers = copied
+	peersMu.Unlock()
+
+	ensureWorkers(copied)
+}
+
+func peerAddresses() []string {
+	peersMu.RLock()
+	defer peersMu.RUnlock()
+	return append([]string(nil), peers...)
 }
