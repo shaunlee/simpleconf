@@ -20,24 +20,31 @@ var pool = sync.Pool{
 }
 
 var (
-	exit bool = false
-	total uint64
-	maxlatency time.Duration
-	minlatency time.Duration = time.Second
+	exit         atomic.Bool
+	total        uint64
+	connected    uint64
+	failed       uint64
+	maxlatency   time.Duration
+	minlatency   time.Duration = time.Second
 	totallatency time.Duration
-	jobs = make(chan struct{})
-	wgr sync.WaitGroup
+	statsMu      sync.Mutex
+	jobs         = make(chan struct{})
+	wgr          sync.WaitGroup
 )
 
 func conn() {
-	nc, _ := net.Dial("tcp4", "127.0.0.1:23466")
+	defer wgr.Done()
+	nc, err := net.Dial("tcp4", host)
+	if err != nil {
+		atomic.AddUint64(&failed, 1)
+		return
+	}
 	defer nc.Close()
+	atomic.AddUint64(&connected, 1)
 	r := bufio.NewReader(nc)
 	w := bufio.NewWriter(nc)
-	wgr.Done()
 
-	for !exit {
-		<-jobs
+	for range jobs {
 
 		ts := time.Now()
 
@@ -49,12 +56,14 @@ func conn() {
 		atomic.AddUint64(&total, 1)
 
 		n := time.Since(ts)
+		statsMu.Lock()
 		if n > maxlatency {
 			maxlatency = n
 		} else if n < minlatency {
 			minlatency = n
 		}
 		totallatency += n
+		statsMu.Unlock()
 	}
 }
 
@@ -114,7 +123,7 @@ func del(r *bufio.Reader, w *bufio.Writer) error {
 }
 
 func main() {
-	duration := flag.Duration("d", 10 * time.Second, "Duration of test")
+	duration := flag.Duration("d", 10*time.Second, "Duration of test")
 	numberOfConnections := flag.Int("c", 120, "Connections to keep open")
 	flag.Parse()
 
@@ -123,23 +132,39 @@ func main() {
 		go conn()
 	}
 	wgr.Wait()
+	connectedNow := atomic.LoadUint64(&connected)
+	if connectedNow == 0 {
+		fmt.Printf("Cannot connect to %s (failed: %d). Start server first.\n", host, atomic.LoadUint64(&failed))
+		return
+	}
 
 	fmt.Printf("Running %v test @ %s\n", duration, host)
-	fmt.Printf("  %d connections\n", *numberOfConnections)
+	fmt.Printf("  %d connections\n", connectedNow)
 
 	startAt := time.Now()
 	go func() {
-		for !exit {
+		for !exit.Load() {
 			jobs <- struct{}{}
 		}
+		close(jobs)
 	}()
 
 	<-time.After(*duration)
-	exit = true
+	exit.Store(true)
 	spent := time.Since(startAt)
+	totalReq := atomic.LoadUint64(&total)
+
+	statsMu.Lock()
+	avgLatency := time.Duration(0)
+	if totalReq > 0 {
+		avgLatency = totallatency / time.Duration(totalReq)
+	}
+	localMax := maxlatency
+	localMin := minlatency
+	statsMu.Unlock()
 
 	fmt.Println("  Stats\t\tAvg\t\tMin\t\tMax")
-	fmt.Printf("  Req/Sec\t%s\t%s\t%s\n", totallatency / time.Duration(total), maxlatency, minlatency)
-	fmt.Printf("  %d requests in %s\n", total, spent)
-	fmt.Printf("Requests/sec: %.2f\n", float64(total) / float64(spent.Seconds()))
+	fmt.Printf("  Latency\t%s\t%s\t%s\n", avgLatency, localMin, localMax)
+	fmt.Printf("  %d requests in %s\n", totalReq, spent)
+	fmt.Printf("Requests/sec: %.2f\n", float64(totalReq)/float64(spent.Seconds()))
 }
