@@ -1,3 +1,0 @@
-db:
-  dir: data
-listen: :23456

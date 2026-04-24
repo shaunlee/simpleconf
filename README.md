@@ -1,13 +1,75 @@
 # simpleconf
 
-Simple way to read and write configurations in a cluster, without single point of failure(SPOF).
+`simpleconf` is a lightweight configuration service that can be operated over HTTP/TCP, with support for:
 
-## config.yml
+- JSON key-path read/write (for example `product.name`)
+- Local append-only persistence
+- Optional Raft cluster mode (no single point of failure)
 
-- db.dir: appendonly database file folder
-- listen: frontend endpoint
+## Quick Start
 
-## example
+Requirements:
+
+- Go 1.25+
+
+Run:
+
+```bash
+go run ./cmd/bin/main.go
+```
+
+By default, HTTP listens on `:23456`.
+
+## Configuration File
+
+The service reads `configs/config.yml`.
+
+Minimal config:
+
+```yaml
+db:
+  dir: data
+listen: :23456
+raft:
+  enabled: false
+```
+
+Common config keys:
+
+- `db.dir`: data directory
+- `listen`: HTTP listen address
+- `tcp.listen`: TCP listen address (TCP is disabled if not set)
+- `raft.enabled`: enable/disable Raft
+- `raft.forward`: whether followers auto-forward writes to leader (default `true`)
+- `raft.node_id`: Raft node ID
+- `raft.listen`: Raft transport address
+- `raft.http_addr`: HTTP address reachable by other nodes/clients
+- `raft.bootstrap`: set `true` only on the first node during initial bootstrap
+- `raft.peers`: format `id,raft_addr,http_addr`
+
+## HTTP Usage
+
+Endpoints:
+
+- `GET /`: basic metadata
+- `GET /db`: get full JSON document
+- `GET /db/:key`: get key-path value
+- `PUT /db/:key`: set key-path value (raw JSON body)
+- `DELETE /db/:key`: delete key path
+- `POST /clone/:from_key/:to_key`: clone value
+- `POST /vacuum`: rewrite append-only file
+
+Examples:
+
+```bash
+curl -s -X PUT http://127.0.0.1:23456/db/product.name -d '"Demo"'
+curl -s -X PUT http://127.0.0.1:23456/db/product.year -d '2026'
+curl -s http://127.0.0.1:23456/db/product
+curl -s -X DELETE http://127.0.0.1:23456/db/product.year
+curl -s -X POST http://127.0.0.1:23456/clone/product.name/product.alias
+```
+
+Original example (httpie):
 
 ```bash
 echo '2017' | http http://localhost:23456/db/product.year
@@ -16,8 +78,8 @@ echo 'false' | http http://localhost:23456/db/product.is_expired
 
 http http://localhost:23456/db/product
 {
-    "is_expired": false, 
-    "name": "Demo", 
+    "is_expired": false,
+    "name": "Demo",
     "year": 2017
 }
 
@@ -25,14 +87,96 @@ http delete http://localhost:23456/db/product.is_expired
 
 http http://localhost:23456/db/product
 {
-    "name": "Demo", 
+    "name": "Demo",
     "year": 2017
 }
 ```
 
-## benchmarks
+## TCP Protocol
 
+Commands:
+
+- `=`: get full JSON document
+- `=key.path`: get key-path value
+- `+key.path` + next line raw JSON: set value
+- `-key.path`: delete value
+- `<from.key.path` + next line `>to.key.path`: clone
+- `*`: vacuum
+- `PING`: returns `+PONG`
+
+Example:
+
+```text
++product.name
+"Demo"
+=product.name
 ```
+
+Protocol Reference:
+
+- Get whole configuration
+- HTTP: `GET /db`
+- TCP: `=`
+- Get value by key path
+- HTTP: `GET /db/{key.path}`
+- TCP: `=key.path`
+- Set value by key path
+- HTTP: `PUT /db/{key.path} {"name":"Demo"}`
+- TCP:
+```text
++key.path
+{"name":"Demo"}
+```
+- Delete key path
+- HTTP: `DELETE /db/{key.path}`
+- TCP: `-key.path`
+- Clone key path
+- HTTP: `POST /clone/{from.key.path}/{to.key.path}`
+- TCP:
+```text
+<from.key.path
+>to.key.path
+```
+- Vacuum
+- HTTP: `POST /vacuum`
+- TCP: `*`
+- Ping
+- TCP: `PING`
+
+## Raft Cluster Usage
+
+Enable Raft:
+
+1. Set `raft.enabled: true` on all nodes
+2. Use different `raft.node_id` / `raft.listen` / `listen` / `db.dir` per node
+3. Use the same `raft.peers` list on all nodes
+4. Set `raft.bootstrap: true` only on the first node during first cluster bring-up
+
+Write behavior:
+
+- `raft.forward=true`: writes sent to followers are auto-forwarded to leader
+- `raft.forward=false`: followers return leader info
+- HTTP: `409` + `{"error":"not leader","leader":"http://..."}`
+- TCP: `-ERR not leader http://...`
+
+Persistence:
+
+- Application data: `db.dir/data.aof`
+- Raft state: `db.dir/raft`
+- No BoltDB dependency
+
+## Legacy Peers Mode
+
+When `raft.enabled=false`, legacy peers sync mode is available (compatibility mode):
+
+- `peers.addresses`
+- `peers.listen`
+
+For production clusters, Raft mode is recommended.
+
+## Benchmarks (Historical)
+
+```text
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
 BenchmarkGet-16      	35865764	       31.97 ns/op	       0 B/op	       0 allocs/op
 BenchmarkSet-16      	 7825952	       153.1 ns/op	      96 B/op	       3 allocs/op
@@ -46,9 +190,9 @@ BenchmarkTcpClone-16    	   53688	     22532 ns/op
 BenchmarkTcpDel-16      	   54684	     22070 ns/op
 ```
 
-TCP
+TCP load test (historical):
 
-```
+```text
 Running 10s GET test @ 127.0.0.1:23466
   500 connections
   Stats		Avg		Min		Max
@@ -71,9 +215,9 @@ Running 10s DELETE test @ 127.0.0.1:23466
 Requests/sec: 339307.05
 ```
 
-wrk
+wrk (historical):
 
-```
+```text
 Running 10s GET test @ http://127.0.0.1:23456/db/bench
   2 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
@@ -102,71 +246,6 @@ Requests/sec: 172110.01
 Transfer/sec:     20.52MB
 ```
 
-## interfaces
-
-#### Get whole configurations
-
-HTTP:
-`GET /db`
-
-TCP:
-`=`
-
-Returns raw JSON, in case of dump the database, don't use it often
-
-#### Get values with key path
-
-HTTP:
-`GET /db/{key.path}`
-
-TCP:
-`=key.path`
-
-Returns raw JSON, use key path as fine-grained as possible
-
-#### Set values by key path
-
-HTTP:
-`PUT /db/{key.path} {"name": "Demo"}`
-
-TCP:
-```
-+key.path
-{"name": "Demo"}
-```
-
-Put any of raw JSON body
-
-#### Delete values key path
-
-`DELETE /db/{key.path}`
-
-TCP:
-`-key.path`
-
-#### Clone values between key path
-
-HTTP:
-`POST /clone/{from.key.path}/{to.key.path}`
-
-TCP:
-```
-<from.key.path
->to.key.path
-```
-
-#### Rewrite appendonly database file
-
-HTTP:
-`POST /vacuum`
-
-TCP:
-`*`
-
-#### TCP ping
-
-`PING`
-
-## License 
+## License
 
 MIT
