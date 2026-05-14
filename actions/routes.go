@@ -6,6 +6,8 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 )
 
+const version = "v0.4.0-beta"
+
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{
 		JSONEncoder: json.Marshal,
@@ -16,7 +18,7 @@ func New() *fiber.App {
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"role":    "master",
-			"version": "v0.4.0-beta",
+			"version": version,
 		})
 	})
 

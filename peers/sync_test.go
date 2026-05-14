@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -126,7 +127,7 @@ func TestSyncUpdatePersistsWALWhenPeerUnavailable(t *testing.T) {
 func resetSyncState(t *testing.T) {
 	t.Helper()
 	SetWALDir(t.TempDir())
-	walCheckpointEvery = 512
+	atomic.StoreInt64(&walCheckpointEvery, 512)
 
 	workersMu.Lock()
 	workers = map[string]*workerState{}
@@ -139,7 +140,7 @@ func resetSyncState(t *testing.T) {
 
 func TestWALAppendAndCheckpoint(t *testing.T) {
 	resetSyncState(t)
-	walCheckpointEvery = 3
+	atomic.StoreInt64(&walCheckpointEvery, 3)
 
 	addr := "http://example-peer"
 	w := &workerState{

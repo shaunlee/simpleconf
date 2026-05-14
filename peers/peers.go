@@ -1,12 +1,13 @@
 package peers
 
 import (
+	"log"
+	"sync"
+
 	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/shaunlee/simpleconf/db"
-	"log"
-	"sync"
 )
 
 var (
@@ -67,7 +68,7 @@ func Listen(addr string, peerAddrs []string) {
 	app.Post("/clone/:from_key/:to_key", clone)
 	app.Post("/vacuum", vacuum)
 
-	if err := app.Listen(addr); err != nil {
+	if err := app.Listen(addr, fiber.ListenConfig{DisableStartupMessage: true}); err != nil {
 		log.Panic(err)
 	}
 }

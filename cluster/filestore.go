@@ -28,7 +28,8 @@ type fileStore struct {
 	kv        map[string][]byte
 	kvInt     map[string]uint64
 
-	walOps int
+	walFile *os.File
+	walOps  int
 }
 
 type persistedState struct {
@@ -200,22 +201,21 @@ func (s *fileStore) applyWALRecordLocked(rec walRecord) error {
 }
 
 func (s *fileStore) appendWALLocked(rec walRecord) error {
-	if err := os.MkdirAll(filepath.Dir(s.walPath), 0o755); err != nil {
-		return err
+	if s.walFile == nil {
+		if err := os.MkdirAll(filepath.Dir(s.walPath), 0o755); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(s.walPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return err
+		}
+		s.walFile = f
 	}
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(s.walPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(append(b, '\n')); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
+	if _, err := s.walFile.Write(append(b, '\n')); err != nil {
 		return err
 	}
 	s.walOps++
@@ -226,6 +226,10 @@ func (s *fileStore) appendWALLocked(rec walRecord) error {
 }
 
 func (s *fileStore) compactLocked() error {
+	if s.walFile != nil {
+		_ = s.walFile.Close()
+		s.walFile = nil
+	}
 	if err := s.persistSnapshotLocked(); err != nil {
 		return err
 	}
@@ -411,5 +415,9 @@ func (s *fileStore) SetUint64(key []byte, val uint64) error {
 func (s *fileStore) GetUint64(key []byte) (uint64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.kvInt[string(key)], nil
+	v, ok := s.kvInt[string(key)]
+	if !ok {
+		return 0, errors.New("not found")
+	}
+	return v, nil
 }

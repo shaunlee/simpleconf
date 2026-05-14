@@ -53,6 +53,7 @@ func (p *Server) Listen(addr string) error {
 			}
 			return err
 		}
+		conn.SetKeepAlive(true)
 		conn.SetKeepAlivePeriod(10 * time.Second)
 		p.wg.Add(1)
 		go p.handle(conn)
@@ -75,6 +76,7 @@ func (p *Server) handle(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
+outer:
 	for !p.exit.Load() {
 		if l, err := readline(reader); err != nil {
 			break
@@ -86,71 +88,71 @@ func (p *Server) handle(conn net.Conn) {
 				k := string(l[1:])
 				val := db.Get(k)
 				if err := writelines(writer, fmt.Sprintf("$%d\n", len(val)), fmt.Sprintf("%s\n", val)); err != nil {
-					break
+					break outer
 				}
 			case '+':
 				if len(l) == 1 {
 					if err := writelines(writer, "-ERR the key path is required\n"); err != nil {
-						break
+						break outer
 					}
 				} else if nl, err := readline(reader); err != nil {
-					break
+					break outer
 				} else {
 					k := string(l[1:])
 					var v any
 					if err := json.Unmarshal(nl, &v); err != nil {
 						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-							break
+							break outer
 						}
 					} else if err := cluster.ApplySet(k, v); err != nil {
 						if nl, ok := cluster.AsNotLeader(err); ok {
 							if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nl.LeaderHTTPAddr)); err != nil {
-								break
+								break outer
 							}
 							continue
 						}
 						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-							break
+							break outer
 						}
 					} else {
 						if err := writelines(writer, "+OK\n"); err != nil {
-							break
+							break outer
 						}
 					}
 				}
 			case '-':
 				if len(l) == 1 {
 					if err := writelines(writer, "-ERR the key path is required\n"); err != nil {
-						break
+						break outer
 					}
 				} else {
 					k := string(l[1:])
 					if err := cluster.ApplyDelete(k); err != nil {
 						if nl, ok := cluster.AsNotLeader(err); ok {
 							if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nl.LeaderHTTPAddr)); err != nil {
-								break
+								break outer
 							}
 							continue
 						}
 						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-							break
+							break outer
 						}
 						continue
 					}
 					if err := writelines(writer, "+OK\n"); err != nil {
-						break
+						break outer
 					}
 				}
 			case '<':
 				if len(l) == 1 {
 					if err := writelines(writer, "-ERR the source key path is required\n"); err != nil {
-						break
+						break outer
 					}
 				} else if nl, err := readline(reader); err != nil {
-					break
+					break outer
 				} else if len(nl) <= 1 || nl[0] != '>' {
 					if err := writelines(writer, "-ERR the target key path is required\n"); err != nil {
-						break
+						break outer
 					}
 				} else {
 					fk := string(l[1:])
@@ -158,46 +160,46 @@ func (p *Server) handle(conn net.Conn) {
 					if err := cluster.ApplyClone(fk, tk); err != nil {
 						if nlErr, ok := cluster.AsNotLeader(err); ok {
 							if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nlErr.LeaderHTTPAddr)); err != nil {
-								break
+								break outer
 							}
 							continue
 						}
 						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-							break
+							break outer
 						}
 						continue
 					}
 					if err := writelines(writer, "+OK\n"); err != nil {
-						break
+						break outer
 					}
 				}
 			case '*':
 				if err := cluster.ApplyVacuum(); err != nil {
 					if nl, ok := cluster.AsNotLeader(err); ok {
 						if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nl.LeaderHTTPAddr)); err != nil {
-							break
+							break outer
 						}
 						continue
 					}
 					if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-						break
+						break outer
 					}
 					continue
 				}
 				if err := writelines(writer, "+OK\n"); err != nil {
-					break
+					break outer
 				}
 			case 'p', 'P':
 				if bytes.EqualFold(l, []byte("PING")) {
 					if err := writelines(writer, "+PONG\n"); err != nil {
-						break
+						break outer
 					}
 					continue
 				}
 				fallthrough
 			default:
 				if err := writelines(writer, "-ERR unknown command\n"); err != nil {
-					break
+					break outer
 				}
 			}
 		}

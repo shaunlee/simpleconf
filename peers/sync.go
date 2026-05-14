@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/goccy/go-json"
-	"github.com/shaunlee/simpleconf/db"
 	"io"
 	"log"
 	"net/http"
@@ -16,7 +14,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/goccy/go-json"
+	"github.com/shaunlee/simpleconf/db"
 )
 
 const (
@@ -25,7 +27,7 @@ const (
 	maxRetries     = 5
 )
 
-var walCheckpointEvery = 512
+var walCheckpointEvery int64 = 512
 
 type syncOp struct {
 	Method      string `json:"method"`
@@ -228,7 +230,7 @@ func (w *workerState) loadWAL() error {
 	if err := w.ensureWALFileLocked(); err != nil {
 		return err
 	}
-	if w.writes >= walCheckpointEvery {
+	if int64(w.writes) >= atomic.LoadInt64(&walCheckpointEvery) {
 		return w.checkpointLocked()
 	}
 	return nil
@@ -280,8 +282,8 @@ func (w *workerState) run() {
 			}
 
 			if !ok {
-				time.Sleep(backoff(0))
-				break
+				log.Printf("dropping sync op after max retries for %s: %s", w.addr, op.Path)
+				// fallthrough and ack it to unblock the rest of the queue
 			}
 			if err := w.ack(); err != nil {
 				log.Println("failed to ack wal", w.addr, err)
@@ -312,7 +314,7 @@ func (w *workerState) ack() error {
 	if err := w.appendAckLocked(); err != nil {
 		return err
 	}
-	if w.writes >= walCheckpointEvery {
+	if int64(w.writes) >= atomic.LoadInt64(&walCheckpointEvery) {
 		return w.checkpointLocked()
 	}
 	return nil
@@ -350,6 +352,9 @@ func (w *workerState) appendEnqueueLocked(op syncOp) error {
 	if _, err := w.walFile.Write([]byte{'\n'}); err != nil {
 		return err
 	}
+	if err := w.walFile.Sync(); err != nil {
+		return err
+	}
 	w.writes++
 	return nil
 }
@@ -359,6 +364,9 @@ func (w *workerState) appendAckLocked() error {
 		return err
 	}
 	if _, err := w.walFile.Write([]byte("A\n")); err != nil {
+		return err
+	}
+	if err := w.walFile.Sync(); err != nil {
 		return err
 	}
 	w.writes++

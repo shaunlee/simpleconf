@@ -18,6 +18,15 @@ import (
 
 const applyTimeout = 3 * time.Second
 
+var forwardClient = &http.Client{
+	Timeout: applyTimeout,
+	Transport: &http.Transport{
+		MaxIdleConns:        16,
+		MaxIdleConnsPerHost: 4,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 type Peer struct {
 	ID       string
 	RaftAddr string
@@ -272,8 +281,7 @@ func (m *Manager) forwardToLeader(c command, leader string) error {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := &http.Client{Timeout: applyTimeout}
-	resp, err := client.Do(req)
+	resp, err := forwardClient.Do(req)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/gofiber/fiber/v3"
 	"github.com/shaunlee/simpleconf/actions"
 	"github.com/shaunlee/simpleconf/cluster"
 	"github.com/shaunlee/simpleconf/db"
@@ -22,7 +23,11 @@ func main() {
 	viper.SetDefault("listen", ":23456")
 	viper.SetDefault("raft.forward", true)
 	viper.AutomaticEnv()
-	viper.ReadInConfig()
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			log.Fatalf("config error: %v", err)
+		}
+	}
 
 	dbdir := viper.GetString("db_dir")
 	if len(dbdir) == 0 {
@@ -31,10 +36,14 @@ func main() {
 	if len(dbdir) == 0 {
 		dbdir = "/data"
 	}
-	db.Init(dbdir)
-	defer db.Close(true)
 
 	raftEnabled := viper.GetBool("raft.enabled")
+	if raftEnabled {
+		db.DisableAOF()
+	}
+
+	db.Init(dbdir)
+	defer db.Close(true)
 	if !raftEnabled {
 		peers.SetWALDir(filepath.Join(dbdir, "peers-wal"))
 	}
@@ -71,7 +80,7 @@ func main() {
 
 	app := actions.New()
 	go func() {
-		if err := app.Listen(viper.GetString("listen")); err != nil {
+		if err := app.Listen(viper.GetString("listen"), fiber.ListenConfig{DisableStartupMessage: true}); err != nil {
 			log.Panic(err)
 		}
 	}()

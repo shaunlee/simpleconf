@@ -26,6 +26,7 @@ const (
 	delCmd
 	dumpCmd
 	setRawCmd
+	closeCmd
 )
 
 var (
@@ -34,11 +35,17 @@ var (
 	configuration = "{}"
 	configMu      sync.RWMutex
 
-	wg       sync.WaitGroup
-	suspend  = make(chan struct{})
-	resume   = make(chan struct{})
-	persists = make(chan *persistable, 100)
+	wg          sync.WaitGroup
+	persists    = make(chan *persistable, 1024)
+	persistExit chan struct{}
+
+	aofEnabled = true
 )
+
+// DisableAOF disables Append-Only File persistence (useful when Raft manages state)
+func DisableAOF() {
+	aofEnabled = false
+}
 
 func setonly(k string, v any) (err error) {
 	configMu.Lock()
@@ -52,8 +59,10 @@ func Set(k string, v any) error {
 		return err
 	}
 
-	wg.Add(1)
-	persists <- &persistable{setCmd, k, v}
+	if aofEnabled {
+		wg.Add(1)
+		persists <- &persistable{setCmd, k, v}
+	}
 	return nil
 }
 
@@ -65,9 +74,10 @@ func delonly(k string) {
 
 func Del(k string) {
 	delonly(k)
-
-	wg.Add(1)
-	persists <- &persistable{delCmd, k, nil}
+	if aofEnabled {
+		wg.Add(1)
+		persists <- &persistable{delCmd, k, nil}
+	}
 }
 
 func Get(k string) string {
@@ -93,115 +103,161 @@ func Replace(raw string) error {
 }
 
 func Clone(fk, tk string) {
-	configMu.Lock()
-	v := gjson.Get(configuration, fk).Raw
-	if len(v) > 0 {
-		configuration, _ = sjson.SetRaw(configuration, tk, v)
-		configMu.Unlock()
-
+	var v string
+	func() {
+		configMu.Lock()
+		defer configMu.Unlock()
+		v = gjson.Get(configuration, fk).Raw
+		if len(v) > 0 {
+			configuration, _ = sjson.SetRaw(configuration, tk, v)
+		}
+	}()
+	if len(v) > 0 && aofEnabled {
 		wg.Add(1)
 		persists <- &persistable{setRawCmd, tk, v}
-		return
 	}
-	configMu.Unlock()
 }
 
 func Vacuum() {
-	suspend <- struct{}{}
-	erase()
-	resume <- struct{}{}
-
-	wg.Add(1)
-	persists <- &persistable{dumpCmd, "", nil}
+	if aofEnabled {
+		wg.Add(1)
+		persists <- &persistable{dumpCmd, "", nil}
+	}
 }
 
 func Init(dir string) {
 	log.Println("init db ...")
 	dbfn = filepath.Join(dir, "data.aof")
 
-	reopen()
-
-	reader := bufio.NewReader(db)
-	for {
-		kl := readline(reader)
-		if kl == nil {
-			break
+	if aofEnabled {
+		if err := reopen(); err != nil {
+			log.Fatalf("failed to open db: %v", err)
 		}
 
-		switch kl[0] {
-		case '+':
-			if vl := readline(reader); vl == nil {
+		reader := bufio.NewReader(db)
+	loop:
+		for {
+			kl := readline(reader)
+			if kl == nil {
 				break
-			} else {
-				configMu.Lock()
-				configuration, _ = sjson.SetRaw(configuration, string(kl[1:]), string(vl))
-				configMu.Unlock()
 			}
-		case '*':
-			if vl := readline(reader); vl == nil {
-				break
-			} else {
-				configMu.Lock()
-				configuration = string(vl)
-				configMu.Unlock()
+
+			switch kl[0] {
+			case '+':
+				if vl := readline(reader); vl == nil {
+					break loop
+				} else {
+					configMu.Lock()
+					configuration, _ = sjson.SetRaw(configuration, string(kl[1:]), string(vl))
+					configMu.Unlock()
+				}
+			case '*':
+				if vl := readline(reader); vl == nil {
+					break loop
+				} else {
+					configMu.Lock()
+					configuration = string(vl)
+					configMu.Unlock()
+				}
+			case '-':
+				delonly(string(kl[1:]))
 			}
-		case '-':
-			delonly(string(kl[1:]))
 		}
 	}
 
+	persistExit = make(chan struct{})
 	go persist()
 	log.Println("db loaded")
 }
 
-func reopen() {
-	Close()
-
-	db, _ = os.OpenFile(dbfn, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0600)
+func reopen() error {
+	if db != nil {
+		db.Sync()
+		db.Close()
+		db = nil
+	}
+	var err error
+	db, err = os.OpenFile(dbfn, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0600)
+	if err != nil {
+		log.Printf("failed to open db file: %v", err)
+		db = nil
+		return err
+	}
+	return nil
 }
 
-func erase() {
-	Close()
+func doEraseAndDump() {
+	if db != nil {
+		db.Sync()
+		db.Close()
+		db = nil
+	}
 
+	// Rename the old AOF for backup
 	os.Rename(dbfn, dbfn+"."+time.Now().Format("060102150405"))
 
-	reopen()
+	if err := reopen(); err != nil {
+		log.Printf("failed to reopen db after vacuum: %v", err)
+		return
+	}
+
+	configMu.RLock()
+	snapshot := configuration
+	configMu.RUnlock()
+
+	fmt.Fprintf(db, "*\n%s\n", snapshot)
+	db.Sync()
 }
 
 func Close(exit ...bool) {
-	if db != nil {
-		if len(exit) > 0 && exit[0] {
-			log.Println("closing db ...")
+	if len(exit) > 0 && exit[0] {
+		log.Println("closing db ...")
+		if aofEnabled {
 			wg.Wait()
 			Vacuum()
 			wg.Wait()
 		}
+
+		wg.Add(1)
+		persists <- &persistable{closeCmd, "", nil}
+		<-persistExit
+	}
+
+	if db != nil {
+		db.Sync()
 		db.Close()
 		db = nil
 	}
 }
 
 func persist() {
-	for {
-		select {
-		case <-suspend:
-			<-resume
-		case row := <-persists:
-			switch row.command {
-			case setCmd:
-				pv, _ := json.Marshal(row.value)
-				fmt.Fprintf(db, "+%s\n%s\n", row.key, pv)
-			case setRawCmd:
-				fmt.Fprintf(db, "+%s\n%s\n", row.key, row.value)
-			case delCmd:
-				fmt.Fprintf(db, "-%s\n", row.key)
-			case dumpCmd:
-				configMu.RLock()
-				fmt.Fprintf(db, "*\n%s\n", configuration)
-				configMu.RUnlock()
+	defer close(persistExit)
+	for row := range persists {
+		switch row.command {
+		case setCmd:
+			if db != nil {
+				pv, err := json.Marshal(row.value)
+				if err != nil {
+					log.Printf("failed to marshal value for key %s: %v", row.key, err)
+				} else {
+					fmt.Fprintf(db, "+%s\n%s\n", row.key, pv)
+				}
 			}
+		case setRawCmd:
+			if db != nil {
+				fmt.Fprintf(db, "+%s\n%s\n", row.key, row.value)
+			}
+		case delCmd:
+			if db != nil {
+				fmt.Fprintf(db, "-%s\n", row.key)
+			}
+		case dumpCmd:
+			doEraseAndDump()
+		case closeCmd:
 			wg.Done()
+			return
 		}
+		wg.Done()
 	}
 }
 
