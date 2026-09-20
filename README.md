@@ -6,7 +6,14 @@
 - Local append-only persistence
 - Optional Raft cluster mode (no single point of failure)
 
-## Benchmarks (Historical)
+## Benchmarks
+
+All numbers below were measured on the same machine (AMD Ryzen 9 5900HX, 16 logical cores,
+Linux). Client and server share the same CPUs, so these are conservative.
+
+### In-memory operations
+
+Pure function calls against the in-memory JSON document — no syscalls, no network.
 
 ```text
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
@@ -14,15 +21,42 @@ BenchmarkGet-16      	35865764	       31.97 ns/op	       0 B/op	       0 allocs/
 BenchmarkSet-16      	 7825952	       153.1 ns/op	      96 B/op	       3 allocs/op
 BenchmarkDel-16      	12272269	       96.00 ns/op	      80 B/op	       3 allocs/op
 BenchmarkClone-16    	 5811598	       205.7 ns/op	     168 B/op	       4 allocs/op
-
-cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkTcpSet-16      	   51232	     22851 ns/op
-BenchmarkTcpGet-16      	   61987	     19295 ns/op
-BenchmarkTcpClone-16    	   53688	     22532 ns/op
-BenchmarkTcpDel-16      	   54684	     22070 ns/op
 ```
 
-TCP load test (historical):
+### TCP protocol
+
+`go test ./server/ -bench Tcp`. The serial benchmarks use a single connection with a strict
+request → response ping-pong, so they measure **round-trip latency**, not throughput. The
+`*Parallel` variants use one connection per goroutine.
+
+```text
+cpu: AMD Ryzen 9 5900HX with Radeon Graphics
+BenchmarkTcpGet-16              	  119824	     19848 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpSet-16              	  117442	     20140 ns/op	     176 B/op	      11 allocs/op
+BenchmarkTcpDel-16              	  122374	     19473 ns/op	     104 B/op	       7 allocs/op
+BenchmarkTcpClone-16            	  121299	     20037 ns/op	     216 B/op	      10 allocs/op
+
+BenchmarkTcpGetParallel-16      	  884726	      2550 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpSetParallel-16      	  954890	      2504 ns/op	     227 B/op	      12 allocs/op
+BenchmarkTcpDelParallel-16      	  920187	      2711 ns/op	     128 B/op	       7 allocs/op
+BenchmarkTcpCloneParallel-16    	  842974	      2714 ns/op	     201 B/op	      11 allocs/op
+```
+
+Concurrency scaling for GET (`-cpu 1,2,4,8,16,64,256`). Note that `-cpu 1` reproduces the
+serial number exactly, and that allocations per op stay flat — the extra time in the serial
+case is syscalls and goroutine scheduling, not the database.
+
+```text
+BenchmarkTcpGetParallel         	  120766	     19324 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-2       	  212628	     10993 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-4       	  375663	      6485 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-8       	  640900	      3767 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-16      	  877633	      2632 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-64      	 1000000	      2272 ns/op	      65 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-256     	  686966	      3364 ns/op	      70 B/op	       8 allocs/op
+```
+
+TCP load test (historical, `go run ./cmd/bench`):
 
 ```text
 Running 10s GET test @ 127.0.0.1:23466
@@ -47,36 +81,77 @@ Running 10s DELETE test @ 127.0.0.1:23466
 Requests/sec: 339307.05
 ```
 
-wrk (historical):
+### HTTP
+
+`wrk -t4 -d10s` against `http://127.0.0.1:23556/db/bench`. With only 10 connections the
+client, not the server, is the bottleneck; raising it to 200 gives roughly 1.5–1.8x the
+throughput.
+
+10 connections:
 
 ```text
-Running 10s GET test @ http://127.0.0.1:23456/db/bench
-  2 threads and 10 connections
+Running 10s GET test @ http://127.0.0.1:23556/db/bench
+  4 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    40.06us   10.91us 738.00us   76.41%
-    Req/Sec   104.03k     4.36k  113.08k    65.35%
-  2091039 requests in 10.10s, 295.14MB read
-Requests/sec: 207040.39
-Transfer/sec:     29.22MB
+    Latency    41.42us   27.25us    2.29ms   97.63%
+    Req/Sec    45.64k     3.60k   49.78k    80.69%
+  1834071 requests in 10.10s, 197.65MB read
+Requests/sec: 181601.69
+Transfer/sec:     19.57MB
 
-Running 10s SET test @ http://127.0.0.1:23456/db/bench
-  2 threads and 10 connections
+Running 10s SET test @ http://127.0.0.1:23556/db/bench
+  4 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    66.40us   34.08us   1.21ms   90.89%
-    Req/Sec    72.18k     1.03k   75.19k    68.81%
-  1450633 requests in 10.10s, 172.93MB read
-Requests/sec: 143629.05
-Transfer/sec:     17.12MB
+    Latency    59.03us   65.95us    4.62ms   98.23%
+    Req/Sec    33.66k     4.17k   39.86k    70.05%
+  1352492 requests in 10.10s, 180.58MB read
+Requests/sec: 133910.28
+Transfer/sec:     17.88MB
 
-Running 10s DELETE test @ http://127.0.0.1:23456/db/bench
-  2 threads and 10 connections
+Running 10s DELETE test @ http://127.0.0.1:23556/db/bench
+  4 threads and 10 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    53.39us   41.82us   3.48ms   96.62%
-    Req/Sec    86.50k     2.24k   95.54k    69.00%
-  1721124 requests in 10.00s, 205.17MB read
-Requests/sec: 172110.01
-Transfer/sec:     20.52MB
+    Latency    50.37us   37.11us    3.05ms   98.15%
+    Req/Sec    38.21k     1.95k   42.11k    70.30%
+  1535204 requests in 10.10s, 204.97MB read
+Requests/sec: 152003.32
+Transfer/sec:     20.29MB
 ```
+
+200 connections:
+
+```text
+Running 10s GET test @ http://127.0.0.1:23556/db/bench
+  4 threads and 200 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   429.73us  197.50us    7.07ms   80.69%
+    Req/Sec    66.40k     1.90k   73.02k    67.00%
+  2642864 requests in 10.03s, 269.69MB read
+Requests/sec: 263504.53
+Transfer/sec:     26.89MB
+
+Running 10s SET test @ http://127.0.0.1:23556/db/bench
+  4 threads and 200 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   529.52us  473.32us   15.81ms   93.63%
+    Req/Sec    60.36k     2.38k   68.74k    70.75%
+  2402580 requests in 10.03s, 320.78MB read
+Requests/sec: 239501.39
+Transfer/sec:     31.98MB
+
+Running 10s DELETE test @ http://127.0.0.1:23556/db/bench
+  4 threads and 200 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   503.34us  405.45us   10.73ms   92.91%
+    Req/Sec    61.53k     2.58k   68.32k    64.50%
+  2448629 requests in 10.03s, 326.93MB read
+Requests/sec: 244092.76
+Transfer/sec:     32.59MB
+```
+
+HTTP tops out lower than the raw TCP protocol mainly because of response size: the wrk runs
+average ~105 bytes per response (status line, `Date`, `Content-Length`, `Content-Type`),
+while the TCP GET reply is `$6\n"mark"\n` — 10 bytes.
 
 ## Quick Start
 
