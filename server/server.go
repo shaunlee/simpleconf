@@ -78,7 +78,7 @@ func (p *Server) handle(conn net.Conn) {
 	writer := bufio.NewWriter(conn)
 outer:
 	for !p.exit.Load() {
-		if l, err := readline(reader); err != nil {
+		if l, err := readlineFlush(reader, writer); err != nil {
 			break
 		} else if len(l) == 0 {
 			continue
@@ -95,7 +95,7 @@ outer:
 					if err := writelines(writer, "-ERR the key path is required\n"); err != nil {
 						break outer
 					}
-				} else if nl, err := readline(reader); err != nil {
+				} else if nl, err := readlineFlush(reader, writer); err != nil {
 					break outer
 				} else {
 					k := string(l[1:])
@@ -148,7 +148,7 @@ outer:
 					if err := writelines(writer, "-ERR the source key path is required\n"); err != nil {
 						break outer
 					}
-				} else if nl, err := readline(reader); err != nil {
+				} else if nl, err := readlineFlush(reader, writer); err != nil {
 					break outer
 				} else if len(nl) <= 1 || nl[0] != '>' {
 					if err := writelines(writer, "-ERR the target key path is required\n"); err != nil {
@@ -203,10 +203,30 @@ outer:
 				}
 			}
 		}
+	}
+	writer.Flush()
+}
+
+// readlineFlush flushes pending output before a read that would have to wait
+// on the socket. Flushing here instead of after every command lets a pipelining
+// client collect many replies per write syscall; a ping-pong client is
+// unaffected, since it never has a further command buffered.
+func readlineFlush(reader *bufio.Reader, writer *bufio.Writer) ([]byte, error) {
+	if !hasBufferedLine(reader) {
 		if err := writer.Flush(); err != nil {
-			break
+			return nil, err
 		}
 	}
+	return readline(reader)
+}
+
+func hasBufferedLine(reader *bufio.Reader) bool {
+	n := reader.Buffered()
+	if n == 0 {
+		return false
+	}
+	b, err := reader.Peek(n)
+	return err == nil && bytes.IndexByte(b, '\n') >= 0
 }
 
 func readline(reader *bufio.Reader) ([]byte, error) {
