@@ -165,9 +165,29 @@ func Init(dir string) {
 		}
 	}
 
+	// A previous Init may have left a persist goroutine running, since Close
+	// without exit=true does not stop it. Two consumers on the same channel
+	// race for the close command, and the loser's Close then blocks forever on
+	// a persistExit that is never closed, so retire the old one first.
+	stopPersist()
+
 	persistExit = make(chan struct{})
 	go persist()
 	log.Println("db loaded")
+}
+
+func stopPersist() {
+	if persistExit == nil {
+		return
+	}
+	select {
+	case <-persistExit:
+		return
+	default:
+	}
+	wg.Add(1)
+	persists <- &persistable{closeCmd, "", nil}
+	<-persistExit
 }
 
 func reopen() error {
