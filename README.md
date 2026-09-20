@@ -184,6 +184,7 @@ raft:
 Common config keys:
 
 - `db.dir`: data directory
+- `db.fsync`: when to fsync the append-only file — `always`, `everysec` (default) or `no`
 - `listen`: HTTP listen address
 - `tcp.listen`: TCP listen address (TCP is disabled if not set)
 - `raft.enabled`: enable/disable Raft
@@ -193,6 +194,27 @@ Common config keys:
 - `raft.http_addr`: HTTP address reachable by other nodes/clients
 - `raft.bootstrap`: set `true` only on the first node during initial bootstrap
 - `raft.peers`: format `id,raft_addr,http_addr`
+
+### Durability
+
+The append-only file is written by a background writer that batches records, so
+a burst of writes costs one write syscall rather than one per record. When the
+file is fsynced is controlled by `db.fsync`:
+
+| `db.fsync` | Survives `kill -9` | Survives power loss | Cost |
+| --- | --- | --- | --- |
+| `always` | yes | yes | writes block until fsync completes |
+| `everysec` (default) | yes | up to 1s of writes lost | negligible |
+| `no` | yes | lost until the OS flushes | none |
+
+Under `always` a successful `PUT`/`DELETE`/clone means the record is on disk;
+concurrent writers share one fsync through group commit. The cost is real: on
+ext4/NVMe, SET throughput measured 19.5k/s under `always` against 237k/s under
+`everysec`.
+
+`everysec` and `no` both survive `kill -9`, because the writer flushes each
+batch to the kernel before going idle; they differ only in exposure to power
+loss.
 
 ## HTTP Usage
 

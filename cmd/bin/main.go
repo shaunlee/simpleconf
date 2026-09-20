@@ -42,13 +42,19 @@ func main() {
 		db.DisableAOF()
 	}
 
+	policy, err := db.ParseFsyncPolicy(viper.GetString("db.fsync"))
+	if err != nil {
+		log.Fatalf("config error: %v", err)
+	}
+	db.SetFsyncPolicy(policy)
+
 	db.Init(dbdir)
 	defer db.Close(true)
 	if !raftEnabled {
 		peers.SetWALDir(filepath.Join(dbdir, "peers-wal"))
 	}
 
-	raftManager, err := cluster.Start(cluster.Config{
+	raftManager, err2 := cluster.Start(cluster.Config{
 		Enabled:   raftEnabled,
 		Forward:   viper.GetBool("raft.forward"),
 		NodeID:    viper.GetString("raft.node_id"),
@@ -58,8 +64,8 @@ func main() {
 		Bootstrap: viper.GetBool("raft.bootstrap"),
 		Peers:     parseRaftPeers(viper.GetStringSlice("raft.peers")),
 	})
-	if err != nil {
-		log.Panic(err)
+	if err2 != nil {
+		log.Panic(err2)
 	}
 	cluster.SetDefault(raftManager)
 	defer raftManager.Shutdown()

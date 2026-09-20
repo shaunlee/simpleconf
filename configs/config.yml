@@ -1,5 +1,7 @@
 db:
   dir: /tmp/simpleconf-test
+  # always | everysec (default) | no -- see README
+  fsync: everysec
 listen: :23456
 tcp:
   listen: :23466
