@@ -2,6 +2,7 @@ package db
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -9,7 +10,7 @@ import (
 
 func resetConfig() {
 	configMu.Lock()
-	configuration = []byte("{}")
+	configRoot = newTreeObj()
 	configSnapshot = "{}"
 	configStale = false
 	configMu.Unlock()
@@ -116,5 +117,58 @@ func BenchmarkClone(b *testing.B) {
 	setonly("bench", "mark")
 	for i := 0; i < b.N; i++ {
 		cloneonly("bench", "mark")
+	}
+}
+
+// BenchmarkDocSize measures how an operation's cost varies with the size of
+// the document and with where in it the key sits. The numbers quoted in
+// README.md come from this benchmark.
+func BenchmarkDocSize(b *testing.B) {
+	for _, n := range []struct {
+		name string
+		keys int
+	}{{"60B", 0}, {"600B", 6}, {"6KB", 70}, {"60KB", 750}} {
+		b.Run(n.name, func(b *testing.B) {
+			resetConfig()
+			setonly("first", "mark")
+			for i := 0; i < n.keys; i++ {
+				setonly(fmt.Sprintf("svc%04d", i), map[string]any{
+					"name": strings.Repeat("x", 40),
+					"port": 8000,
+				})
+			}
+			setonly("last", "mark")
+
+			b.Run("Get_first", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					Get("first")
+				}
+			})
+			b.Run("Get_last", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					Get("last")
+				}
+			})
+			b.Run("Get_whole", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					Get("")
+				}
+			})
+			b.Run("Set_first", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					setonly("first", "mark")
+				}
+			})
+			b.Run("Set_last", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					setonly("last", "mark")
+				}
+			})
+		})
 	}
 }

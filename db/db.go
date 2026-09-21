@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 	"log"
 	"os"
 	"path/filepath"
@@ -73,16 +72,15 @@ var (
 
 	dbfn string
 	db   *os.File
-	// configuration is the mutable master copy, updated in place where sjson
-	// can manage it. configSnapshot is an immutable string view handed to
-	// readers, rebuilt lazily after a write; because it is a copy, a value a
-	// reader already holds can never be changed underneath it.
-	configuration  = []byte("{}")
+	// configRoot is the document, held as a tree so that a keyed read or
+	// write costs O(depth) rather than O(offset). configSnapshot is its
+	// serialized form, rebuilt lazily after a write; it serves whole-document
+	// reads and the gjson query paths, and because it is an immutable string a
+	// value a reader already holds can never change underneath it.
+	configRoot     = newTreeObj()
 	configSnapshot = "{}"
 	configStale    bool
 	configMu       sync.RWMutex
-
-	inPlace = &sjson.Options{Optimistic: true, ReplaceInPlace: true}
 
 	wg          sync.WaitGroup
 	persists    = make(chan persistable, 1024)
@@ -96,10 +94,10 @@ func DisableAOF() {
 	aofEnabled = false
 }
 
-// rawJSON renders v the way sjson.SetBytesOptions would, so that writes can go
-// through SetRawBytesOptions instead. That matters because sjson's in-place
-// path refuses to stringify a value needing escapes and silently returns the
-// document unchanged; feeding it raw JSON avoids that branch entirely.
+// rawJSON renders v exactly as sjson.SetBytesOptions would. The document is no
+// longer held as a string, but the rules are kept because they decide the
+// stored text of every value, and changing them would change what the API
+// returns.
 func rawJSON(v any) ([]byte, error) {
 	switch v := v.(type) {
 	case nil:
@@ -155,16 +153,25 @@ func stringifyJSON(s string) []byte {
 	return append(b, '"')
 }
 
-func setonly(k string, v any) (err error) {
+func setonly(k string, v any) error {
 	raw, err := rawJSON(v)
 	if err != nil {
 		return err
 	}
+	return setrawonly(k, raw)
+}
+
+func setrawonly(k string, raw []byte) error {
+	val := parseTreeRaw(raw)
 	configMu.Lock()
 	defer configMu.Unlock()
-	configuration, err = sjson.SetRawBytesOptions(configuration, k, raw, inPlace)
+	n, err := treeSet(configRoot, splitTreePath(k), val)
+	if err != nil {
+		return err
+	}
+	configRoot = n.(*treeObj)
 	configStale = true
-	return
+	return nil
 }
 
 func Set(k string, v any) error {
@@ -179,7 +186,7 @@ func Set(k string, v any) error {
 func delonly(k string) {
 	configMu.Lock()
 	defer configMu.Unlock()
-	configuration, _ = sjson.DeleteBytes(configuration, k)
+	configRoot = treeDel(configRoot, splitTreePath(k)).(*treeObj)
 	configStale = true
 }
 
@@ -189,29 +196,48 @@ func Del(k string) {
 }
 
 func Get(k string) string {
-	configMu.RLock()
-	if !configStale {
-		snapshot := configSnapshot
-		configMu.RUnlock()
-		return lookup(snapshot, k)
+	// A plain key path is answered from the tree without touching the
+	// snapshot, so its cost does not grow with the document.
+	if len(k) > 0 && isPlainPath(k) {
+		configMu.RLock()
+		defer configMu.RUnlock()
+		n, ok := treeLookup(configRoot, splitTreePath(k))
+		if !ok {
+			return ""
+		}
+		if l, isLeaf := n.(treeLeaf); isLeaf {
+			return string(l)
+		}
+		return string(appendTree(nil, n))
 	}
-	configMu.RUnlock()
-
-	configMu.Lock()
-	if configStale {
-		configSnapshot = string(configuration)
-		configStale = false
-	}
-	snapshot := configSnapshot
-	configMu.Unlock()
-	return lookup(snapshot, k)
-}
-
-func lookup(snapshot, k string) string {
+	// The whole document, and gjson's query syntax, are served from the
+	// snapshot. Delegating queries to gjson keeps their semantics exact
+	// rather than reimplemented.
+	snapshot := snapshot()
 	if len(k) == 0 {
 		return snapshot
 	}
 	return gjson.Get(snapshot, k).Raw
+}
+
+// snapshot returns the serialized document, rebuilding it if a write has
+// happened since it was last taken.
+func snapshot() string {
+	configMu.RLock()
+	if !configStale {
+		s := configSnapshot
+		configMu.RUnlock()
+		return s
+	}
+	configMu.RUnlock()
+
+	configMu.Lock()
+	defer configMu.Unlock()
+	if configStale {
+		configSnapshot = string(appendTree(make([]byte, 0, len(configSnapshot)+64), configRoot))
+		configStale = false
+	}
+	return configSnapshot
 }
 
 func Replace(raw string) error {
@@ -220,8 +246,12 @@ func Replace(raw string) error {
 		return err
 	}
 
+	root, ok := parseTreeRaw([]byte(raw)).(*treeObj)
+	if !ok {
+		root = newTreeObj()
+	}
 	configMu.Lock()
-	configuration = []byte(raw)
+	configRoot = root
 	configSnapshot = raw
 	configStale = false
 	configMu.Unlock()
@@ -232,13 +262,20 @@ func Replace(raw string) error {
 // which is empty when the source does not exist.
 func cloneonly(fk, tk string) string {
 	configMu.Lock()
-	defer configMu.Unlock()
-	v := gjson.GetBytes(configuration, fk).Raw
-	if len(v) > 0 {
-		configuration, _ = sjson.SetRawBytesOptions(configuration, tk, []byte(v), inPlace)
-		configStale = true
+	src, ok := treeLookup(configRoot, splitTreePath(fk))
+	if !ok {
+		configMu.Unlock()
+		return ""
 	}
-	return v
+	raw := appendTree(nil, src)
+	configMu.Unlock()
+	if len(raw) == 0 {
+		return ""
+	}
+	if err := setrawonly(tk, raw); err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func Clone(fk, tk string) {
@@ -290,17 +327,20 @@ func Init(dir string) {
 				if vl := readline(reader); vl == nil {
 					break loop
 				} else {
-					configMu.Lock()
-					configuration, _ = sjson.SetRawBytes(configuration, string(kl[1:]), vl)
-					configStale = true
-					configMu.Unlock()
+					if err := setrawonly(string(kl[1:]), vl); err != nil {
+						log.Printf("skipping bad aof record for %q: %v", kl[1:], err)
+					}
 				}
 			case '*':
 				if vl := readline(reader); vl == nil {
 					break loop
 				} else {
+					root, ok := parseTreeRaw(vl).(*treeObj)
+					if !ok {
+						root = newTreeObj()
+					}
 					configMu.Lock()
-					configuration = append(configuration[:0], vl...)
+					configRoot = root
 					configStale = true
 					configMu.Unlock()
 				}
@@ -366,11 +406,7 @@ func doEraseAndDump() {
 		return
 	}
 
-	configMu.RLock()
-	snapshot := string(configuration)
-	configMu.RUnlock()
-
-	fmt.Fprintf(db, "*\n%s\n", snapshot)
+	fmt.Fprintf(db, "*\n%s\n", snapshot())
 	db.Sync()
 }
 
