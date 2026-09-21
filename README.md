@@ -8,9 +8,8 @@
 
 ## Benchmarks
 
-Measured on an AMD Ryzen 9 5900HX (16 logical cores, Linux). The micro-benchmarks
-below were reproducible across runs; the load-test figures further down are
-older and are labelled as such.
+Measured on an AMD Ryzen 9 5900HX (16 logical cores, Linux), with the client on
+the same machine, so the throughput figures are conservative.
 
 ### In-memory operations
 
@@ -92,43 +91,28 @@ BenchmarkTcpGetParallel-256     	      3364 ns/op	      70 B/op	       8 allocs/
 
 Because the server only flushes before a read that would block, a client that
 pipelines commands collects many replies per write syscall. Measured with 50
-connections at the depth shown, before and after that change:
+connections, `db.fsync: everysec`, data directory on tmpfs:
 
 ```text
-depth   GET before      GET after
-1         289k req/s      295k req/s
-8         752k req/s     1.90M req/s
-64        914k req/s     7.34M req/s
+depth   GET             SET
+1         339k req/s      286k req/s
+8        2.12M req/s      693k req/s
+64       8.33M req/s     1.14M req/s
 ```
 
-### Load tests (older builds)
+### HTTP
 
-The figures below predate the pipelining and fsync work and have not been
-re-measured on a quiet machine; treat them as indicative only.
+`wrk -t4`, same configuration:
 
 ```text
-Running 10s GET test @ localhost:23466
-  500 connections
-  Latency	659.187µs avg
-Requests/sec: 492843.59
-
-Running 10s SET test @ localhost:23466
-  100 connections
-  Latency	300.293µs avg
-Requests/sec: 287454.47
+connections   GET             SET             DEL
+10             173k req/s      134k req/s      143k req/s
+200            256k req/s      237k req/s      241k req/s
 ```
 
-```text
-Running 10s GET test @ http://localhost:23456/db/bench
-  4 threads and 200 connections
-  Latency   429.73us
-Requests/sec: 263504.53
-
-Running 10s SET test @ http://localhost:23456/db/bench
-  4 threads and 200 connections
-  Latency   529.52us
-Requests/sec: 239501.39
-```
+HTTP tops out below the raw TCP protocol mainly because of response size: a
+reply averages around 105 bytes of status line and headers, against 10 bytes
+for the TCP `GET` reply `$6\n"mark"\n`.
 
 ## Quick Start
 
