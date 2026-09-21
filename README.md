@@ -11,6 +11,29 @@
 Measured on an AMD Ryzen 9 5900HX (16 logical cores, Linux), with the client on
 the same machine, so the throughput figures are conservative.
 
+### Compared with similar tools
+
+Single-key throughput against etcd, Consul and Valkey, all run from their
+official Docker images on the same machine with host networking.
+
+![HTTP API throughput: simpleconf, Consul, etcd](docs/images/bench-http.svg)
+
+![Native protocol throughput: simpleconf TCP, Valkey RESP](docs/images/bench-native.svg)
+
+The comparison is not like for like, and the gaps overstate the difference in
+implementation:
+
+- simpleconf and Valkey append to a file fsynced once a second; etcd and
+  Consul replicate every write through Raft and fsync it before replying.
+- etcd is measured through its HTTP/JSON gateway, not its native gRPC API; a
+  local `serializable` read is no faster (30.9k/s), so the gateway is the limit.
+- Consul runs as a single server with data on disk, not in `-dev` mode.
+- Valkey is shown with the better of two settings: `--io-threads 4` at depth 1
+  (107k GET / 95k SET with the default single thread), the default at depth 64.
+  It executes commands on one thread, while simpleconf serves reads in parallel.
+- Valkey is driven by `valkey-benchmark --threads 8`, simpleconf by its own Go
+  client, so the client overhead differs.
+
 ### TCP pipelining
 
 Because the server only flushes before a read that would block, a client that
