@@ -11,16 +11,46 @@
 Measured on an AMD Ryzen 9 5900HX (16 logical cores, Linux), with the client on
 the same machine, so the throughput figures are conservative.
 
+### TCP pipelining
+
+Because the server only flushes before a read that would block, a client that
+pipelines commands collects many replies per write syscall. Measured with 50
+connections and `db.fsync: everysec`, against a 16-byte document and a 21.8 KB
+one — the figures track each other, which is the point of the representation:
+
+```text
+          16 B document          21.8 KB document
+depth     GET        SET         GET        SET
+1          310k/s     253k/s      283k/s     239k/s
+8         2.03M/s     845k/s     2.05M/s     885k/s
+64        8.46M/s    1.28M/s     8.65M/s    1.44M/s
+```
+
+### HTTP
+
+`wrk -t4`, same configuration and the same two documents:
+
+```text
+              16 B document                  21.8 KB document
+conns    GET       SET       DEL        GET       SET       DEL
+10       137k/s    110k/s    124k/s     153k/s    118k/s    124k/s
+200      237k/s    225k/s    233k/s     230k/s    221k/s    237k/s
+```
+
+HTTP tops out below the raw TCP protocol mainly because of response size: a
+reply averages around 105 bytes of status line and headers, against 10 bytes
+for the TCP `GET` reply `$6\n"mark"\n`.
+
 ### In-memory operations
 
 Pure function calls against the in-memory document — no syscalls, no network.
 
 ```text
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkGet-16      	22905945	       101.5 ns/op	      80 B/op	       3 allocs/op
-BenchmarkSet-16      	 9461450	       241.6 ns/op	     136 B/op	       8 allocs/op
-BenchmarkDel-16      	29906817	        73.41 ns/op	      69 B/op	       2 allocs/op
-BenchmarkClone-16    	 7213230	       347.4 ns/op	     216 B/op	      11 allocs/op
+BenchmarkGet-16      	18202971	        69.44 ns/op	      24 B/op	       2 allocs/op
+BenchmarkSet-16      	 5659772	       209.1 ns/op	      80 B/op	       7 allocs/op
+BenchmarkDel-16      	24196832	        49.55 ns/op	      16 B/op	       1 allocs/op
+BenchmarkClone-16    	 4524405	       269.1 ns/op	     104 B/op	       9 allocs/op
 ```
 
 ### Scaling with document size
@@ -31,18 +61,18 @@ large the document is, nor on where in it the key sits. Whole-document reads
 are served from a snapshot that is rebuilt only after a write.
 
 ```text
-BenchmarkDocSize/60B/Get_first-16      	        98.73 ns/op	      80 B/op
-BenchmarkDocSize/60B/Get_last-16       	        95.41 ns/op	      80 B/op
-BenchmarkDocSize/60B/Get_whole-16      	         5.60 ns/op	       0 B/op
-BenchmarkDocSize/60B/Set_last-16       	       231.8 ns/op	     136 B/op
-BenchmarkDocSize/600B/Get_last-16      	        99.37 ns/op	      80 B/op
-BenchmarkDocSize/600B/Set_last-16      	       241.8 ns/op	     136 B/op
-BenchmarkDocSize/6KB/Get_last-16       	        98.52 ns/op	      80 B/op
-BenchmarkDocSize/6KB/Set_last-16       	       238.9 ns/op	     136 B/op
-BenchmarkDocSize/60KB/Get_first-16     	       109.6 ns/op	      80 B/op
-BenchmarkDocSize/60KB/Get_last-16      	       103.3 ns/op	      80 B/op
-BenchmarkDocSize/60KB/Get_whole-16     	         5.61 ns/op	       0 B/op
-BenchmarkDocSize/60KB/Set_last-16      	       242.1 ns/op	     136 B/op
+BenchmarkDocSize/60B/Get_first-16   	 17567499	       72.06 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/60B/Get_last-16    	 17037295	       69.59 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/60B/Get_whole-16   	205617865	       5.824 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/60B/Set_last-16    	  5832117	       206.6 ns/op	      80 B/op	       7 allocs/op
+BenchmarkDocSize/600B/Get_last-16   	 15943088	       72.83 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/600B/Set_last-16   	  5669923	       207.9 ns/op	      80 B/op	       7 allocs/op
+BenchmarkDocSize/6KB/Get_last-16    	 16001305	       76.12 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/6KB/Set_last-16    	  5620524	       203.7 ns/op	      80 B/op	       7 allocs/op
+BenchmarkDocSize/60KB/Get_first-16  	 15006763	       78.54 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/60KB/Get_last-16   	 14920532	       77.65 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/60KB/Get_whole-16  	212638714	       5.708 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/60KB/Set_last-16   	  5909949	       216.6 ns/op	      80 B/op	       7 allocs/op
 ```
 
 Two costs still grow with the document: rebuilding the snapshot after a write,
@@ -71,44 +101,16 @@ goroutine.
 
 ```text
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkTcpGet-16              	  118412	     19916 ns/op	     144 B/op	      11 allocs/op
-BenchmarkTcpSet-16              	  115828	     20311 ns/op	     224 B/op	      16 allocs/op
-BenchmarkTcpDel-16              	  124525	     19421 ns/op	      96 B/op	       6 allocs/op
-BenchmarkTcpClone-16            	  120098	     20226 ns/op	     280 B/op	      18 allocs/op
+BenchmarkTcpGet-16              	   62134	     20174 ns/op	      80 B/op	       8 allocs/op
+BenchmarkTcpSet-16              	   58096	     20083 ns/op	     168 B/op	      15 allocs/op
+BenchmarkTcpDel-16              	   63088	     19194 ns/op	      48 B/op	       5 allocs/op
+BenchmarkTcpClone-16            	   61641	     19933 ns/op	     168 B/op	      16 allocs/op
 
-BenchmarkTcpGetParallel-16      	  907545	      2671 ns/op	     142 B/op	      11 allocs/op
-BenchmarkTcpSetParallel-16      	  910816	      2624 ns/op	     221 B/op	      16 allocs/op
-BenchmarkTcpDelParallel-16      	  830340	      2833 ns/op	     101 B/op	       6 allocs/op
-BenchmarkTcpCloneParallel-16    	  774948	      2898 ns/op	     274 B/op	      18 allocs/op
+BenchmarkTcpGetParallel-16      	  459609	      2697 ns/op	      84 B/op	       8 allocs/op
+BenchmarkTcpSetParallel-16      	  457113	      2754 ns/op	     166 B/op	      15 allocs/op
+BenchmarkTcpDelParallel-16      	  450898	      2713 ns/op	      48 B/op	       5 allocs/op
+BenchmarkTcpCloneParallel-16    	  411650	      3157 ns/op	     169 B/op	      16 allocs/op
 ```
-
-Because the server only flushes before a read that would block, a client that
-pipelines commands collects many replies per write syscall. Measured with 50
-connections and `db.fsync: everysec`, against a 16-byte document and a 21.8 KB
-one — the figures track each other, which is the point of the representation:
-
-```text
-          16 B document          21.8 KB document
-depth     GET        SET         GET        SET
-1          322k/s     276k/s      307k/s     286k/s
-8         1.95M/s     783k/s     2.14M/s     818k/s
-64        5.97M/s    1.22M/s     5.96M/s    1.24M/s
-```
-
-### HTTP
-
-`wrk -t4`, same configuration and the same two documents:
-
-```text
-              16 B document              21.8 KB document
-conns    GET      SET      DEL      GET      SET      DEL
-10        144k     115k     120k     146k     116k     125k
-200       246k     230k     237k     246k     222k     234k
-```
-
-HTTP tops out below the raw TCP protocol mainly because of response size: a
-reply averages around 105 bytes of status line and headers, against 10 bytes
-for the TCP `GET` reply `$6\n"mark"\n`.
 
 ## Quick Start
 
