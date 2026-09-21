@@ -2,6 +2,7 @@ package db
 
 import (
 	"bufio"
+	stdjson "encoding/json"
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/tidwall/gjson"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -94,10 +96,73 @@ func DisableAOF() {
 	aofEnabled = false
 }
 
+// rawJSON renders v the way sjson.SetBytesOptions would, so that writes can go
+// through SetRawBytesOptions instead. That matters because sjson's in-place
+// path refuses to stringify a value needing escapes and silently returns the
+// document unchanged; feeding it raw JSON avoids that branch entirely.
+func rawJSON(v any) ([]byte, error) {
+	switch v := v.(type) {
+	case nil:
+		return []byte("null"), nil
+	case string:
+		return stringifyJSON(v), nil
+	case []byte:
+		return stringifyJSON(string(v)), nil
+	case bool:
+		if v {
+			return []byte("true"), nil
+		}
+		return []byte("false"), nil
+	case int:
+		return strconv.AppendInt(nil, int64(v), 10), nil
+	case int8:
+		return strconv.AppendInt(nil, int64(v), 10), nil
+	case int16:
+		return strconv.AppendInt(nil, int64(v), 10), nil
+	case int32:
+		return strconv.AppendInt(nil, int64(v), 10), nil
+	case int64:
+		return strconv.AppendInt(nil, v, 10), nil
+	case uint:
+		return strconv.AppendUint(nil, uint64(v), 10), nil
+	case uint8:
+		return strconv.AppendUint(nil, uint64(v), 10), nil
+	case uint16:
+		return strconv.AppendUint(nil, uint64(v), 10), nil
+	case uint32:
+		return strconv.AppendUint(nil, uint64(v), 10), nil
+	case uint64:
+		return strconv.AppendUint(nil, v, 10), nil
+	case float32:
+		return strconv.AppendFloat(nil, float64(v), 'f', -1, 64), nil
+	case float64:
+		return strconv.AppendFloat(nil, v, 'f', -1, 64), nil
+	}
+	return stdjson.Marshal(v)
+}
+
+// stringifyJSON mirrors sjson's appendStringify.
+func stringifyJSON(s string) []byte {
+	for i := 0; i < len(s); i++ {
+		if s[i] < ' ' || s[i] > 0x7f || s[i] == '"' || s[i] == '\\' {
+			b, _ := stdjson.Marshal(s)
+			return b
+		}
+	}
+	b := make([]byte, 0, len(s)+2)
+	b = append(b, '"')
+	b = append(b, s...)
+	return append(b, '"')
+}
+
 func setonly(k string, v any) (err error) {
+	raw, err := rawJSON(v)
+	if err != nil {
+		return err
+	}
 	configMu.Lock()
 	defer configMu.Unlock()
-	configuration, err = sjson.SetBytesOptions(configuration, k, v, inPlace)
+	configuration, err = sjson.SetRawBytesOptions(configuration, k, raw, inPlace)
 	configStale = true
 	return
 }

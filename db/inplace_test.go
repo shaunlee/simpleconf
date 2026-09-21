@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -73,4 +74,33 @@ func TestConcurrentReadWrite(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// TestEscapedValueWrite guards a trap in sjson's in-place path: asked to
+// stringify a value needing escapes, it returns the document unchanged and
+// reports no error. Writing pre-rendered raw JSON avoids that branch, so every
+// value below must land even though it fits in the slot it replaces.
+func TestEscapedValueWrite(t *testing.T) {
+	for _, c := range []struct{ name, val string }{
+		{"quote", `a"b`},
+		{"backslash", `a\b`},
+		{"control", "a\nb"},
+		{"nonascii", "中文字"},
+		{"plain", "abcd"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			resetConfig()
+			setonly("k", "xxxxxxxxxxxxxxxxxxxx")
+			if err := setonly("k", c.val); err != nil {
+				t.Fatalf("setonly: %v", err)
+			}
+			var got string
+			if err := json.Unmarshal([]byte(Get("k")), &got); err != nil {
+				t.Fatalf("unmarshal %q: %v", Get("k"), err)
+			}
+			if got != c.val {
+				t.Errorf("got %q, want %q", got, c.val)
+			}
+		})
+	}
 }
