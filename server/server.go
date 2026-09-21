@@ -8,6 +8,7 @@ import (
 	"github.com/shaunlee/simpleconf/cluster"
 	"github.com/shaunlee/simpleconf/db"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -89,7 +90,7 @@ outer:
 			case '=':
 				k := string(l[1:])
 				val := db.Get(k)
-				if err := writelines(writer, fmt.Sprintf("$%d\n", len(val)), fmt.Sprintf("%s\n", val)); err != nil {
+				if err := writeBulk(writer, val); err != nil {
 					break outer
 				}
 			case '+':
@@ -237,6 +238,17 @@ func readline(reader *bufio.Reader) ([]byte, error) {
 	} else {
 		return bytes.TrimSpace(line), nil
 	}
+}
+
+// writeBulk writes a "$<len>\n<val>\n" reply without going through fmt,
+// which dominated the cost of a GET.
+func writeBulk(writer *bufio.Writer, val string) error {
+	var n [20]byte
+	writer.WriteByte('$')
+	writer.Write(strconv.AppendInt(n[:0], int64(len(val)), 10))
+	writer.WriteByte('\n')
+	writer.WriteString(val)
+	return writer.WriteByte('\n')
 }
 
 func writelines(writer *bufio.Writer, lines ...string) error {

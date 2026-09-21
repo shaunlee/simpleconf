@@ -18,6 +18,7 @@ package db
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/tidwall/gjson"
 )
@@ -146,6 +147,10 @@ func isPlainPath(p string) bool {
 // splitTreePath splits on unescaped dots, with `\` escaping the next
 // character, matching sjson.
 func splitTreePath(p string) []string {
+	// Without escapes the segments can share the path's memory.
+	if strings.IndexByte(p, '\\') < 0 {
+		return strings.Split(p, ".")
+	}
 	out := make([]string, 0, 4)
 	cur := make([]byte, 0, len(p))
 	for i := 0; i < len(p); i++ {
