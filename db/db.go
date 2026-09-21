@@ -135,17 +135,20 @@ func Replace(raw string) error {
 	return nil
 }
 
-func Clone(fk, tk string) {
-	var v string
-	func() {
-		configMu.Lock()
-		defer configMu.Unlock()
-		v = gjson.Get(configuration, fk).Raw
-		if len(v) > 0 {
-			configuration, _ = sjson.SetRaw(configuration, tk, v)
-		}
-	}()
+// cloneonly copies a key path in memory and reports the raw value it copied,
+// which is empty when the source does not exist.
+func cloneonly(fk, tk string) string {
+	configMu.Lock()
+	defer configMu.Unlock()
+	v := gjson.Get(configuration, fk).Raw
 	if len(v) > 0 {
+		configuration, _ = sjson.SetRaw(configuration, tk, v)
+	}
+	return v
+}
+
+func Clone(fk, tk string) {
+	if v := cloneonly(fk, tk); len(v) > 0 {
 		appendAOF(persistable{command: setRawCmd, key: tk, value: v})
 	}
 }

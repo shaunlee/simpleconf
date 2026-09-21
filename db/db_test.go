@@ -30,6 +30,9 @@ func TestSetGetDelClone(t *testing.T) {
 	if got, want := Get("bench_copy"), "\"mark\""; got != want {
 		t.Fatalf("Clone result mismatch: got %q want %q", got, want)
 	}
+	if got, want := cloneonly("bench", "bench_copy2"), "\"mark\""; got != want {
+		t.Fatalf("cloneonly should report the copied value: got %q want %q", got, want)
+	}
 
 	Clone("missing", "ignored")
 	if got := Get("ignored"); got != "" {
@@ -110,6 +113,6 @@ func BenchmarkDel(b *testing.B) {
 func BenchmarkClone(b *testing.B) {
 	setonly("bench", "mark")
 	for i := 0; i < b.N; i++ {
-		Clone("bench", "mark")
+		cloneonly("bench", "mark")
 	}
 }
