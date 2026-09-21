@@ -8,150 +8,127 @@
 
 ## Benchmarks
 
-All numbers below were measured on the same machine (AMD Ryzen 9 5900HX, 16 logical cores,
-Linux). Client and server share the same CPUs, so these are conservative.
+Measured on an AMD Ryzen 9 5900HX (16 logical cores, Linux). The micro-benchmarks
+below were reproducible across runs; the load-test figures further down are
+older and are labelled as such.
 
 ### In-memory operations
 
-Pure function calls against the in-memory JSON document — no syscalls, no network.
+Pure function calls against the in-memory document — no syscalls, no network.
 
 ```text
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkGet-16      	35865764	       31.97 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSet-16      	 7825952	       153.1 ns/op	      96 B/op	       3 allocs/op
-BenchmarkDel-16      	12272269	       96.00 ns/op	      80 B/op	       3 allocs/op
-BenchmarkClone-16    	 5811598	       205.7 ns/op	     168 B/op	       4 allocs/op
+BenchmarkGet-16      	48848946	        48.02 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet-16      	12734566	       189.0 ns/op	      96 B/op	       3 allocs/op
+BenchmarkDel-16      	16635156	       135.3 ns/op	      80 B/op	       3 allocs/op
+BenchmarkClone-16    	 9288730	       261.9 ns/op	     168 B/op	       4 allocs/op
 ```
+
+### Scaling with document size
+
+The document is held as a single JSON string, read with `gjson` and rewritten
+with `sjson`. That makes reads of an early key constant-time regardless of
+document size, but two costs grow:
+
+- `Get` scans from the start, so a key late in the document costs proportionally
+  to its offset.
+- `Set` rebuilds the whole string, so it costs — and allocates — proportionally
+  to the document size.
+
+```text
+BenchmarkDocSize/60B/Get_first-16      	        94.20 ns/op
+BenchmarkDocSize/60B/Get_last-16       	        93.20 ns/op
+BenchmarkDocSize/60B/Set-16            	       433.5 ns/op	     256 B/op
+BenchmarkDocSize/591B/Get_last-16      	       370.9 ns/op
+BenchmarkDocSize/591B/Set-16           	       674.7 ns/op	    1384 B/op
+BenchmarkDocSize/5991B/Get_last-16     	      3168 ns/op
+BenchmarkDocSize/5991B/Set-16          	      1774 ns/op	   12520 B/op
+BenchmarkDocSize/60891B/Get_first-16   	        94.45 ns/op
+BenchmarkDocSize/60891B/Get_last-16    	     31213 ns/op
+BenchmarkDocSize/60891B/Set-16         	     13767 ns/op	  131305 B/op
+```
+
+This suits a configuration service, where documents are small and writes are
+rare, and it is what buys the zero-allocation `Get`. It is a poor fit for a
+large, write-heavy document: at 60 KB a write costs 13.8 µs and discards 131 KB.
+The representation is also what provides the `gjson`/`sjson` key-path semantics
+the API exposes — array indexing (`svc.ports.1`), appending and padding, index
+deletion with shifting, and escaped dots (`m.x\.y`).
 
 ### TCP protocol
 
-`go test ./server/ -bench Tcp`. The serial benchmarks use a single connection with a strict
-request → response ping-pong, so they measure **round-trip latency**, not throughput. The
-`*Parallel` variants use one connection per goroutine.
+`go test ./server/ -bench Tcp`. The serial benchmarks use a single connection
+with a strict request → response ping-pong, so they measure **round-trip
+latency**, not throughput. The `*Parallel` variants use one connection per
+goroutine.
 
 ```text
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkTcpGet-16              	  119824	     19848 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpSet-16              	  117442	     20140 ns/op	     176 B/op	      11 allocs/op
-BenchmarkTcpDel-16              	  122374	     19473 ns/op	     104 B/op	       7 allocs/op
-BenchmarkTcpClone-16            	  121299	     20037 ns/op	     216 B/op	      10 allocs/op
+BenchmarkTcpGet-16              	  121798	     19978 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpSet-16              	  116130	     20378 ns/op	     176 B/op	      11 allocs/op
+BenchmarkTcpDel-16              	  111019	     20064 ns/op	     104 B/op	       7 allocs/op
+BenchmarkTcpClone-16            	  114981	     20104 ns/op	     232 B/op	      11 allocs/op
 
-BenchmarkTcpGetParallel-16      	  884726	      2550 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpSetParallel-16      	  954890	      2504 ns/op	     227 B/op	      12 allocs/op
-BenchmarkTcpDelParallel-16      	  920187	      2711 ns/op	     128 B/op	       7 allocs/op
-BenchmarkTcpCloneParallel-16    	  842974	      2714 ns/op	     201 B/op	      11 allocs/op
+BenchmarkTcpGetParallel-16      	  912423	      2707 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpSetParallel-16      	  882728	      2875 ns/op	     227 B/op	      12 allocs/op
+BenchmarkTcpDelParallel-16      	  764455	      3268 ns/op	     128 B/op	       7 allocs/op
+BenchmarkTcpCloneParallel-16    	  696648	      3106 ns/op	     217 B/op	      12 allocs/op
 ```
 
-Concurrency scaling for GET (`-cpu 1,2,4,8,16,64,256`). Note that `-cpu 1` reproduces the
-serial number exactly, and that allocations per op stay flat — the extra time in the serial
-case is syscalls and goroutine scheduling, not the database.
+A `-cpu` sweep of the parallel GET shows `-cpu 1` reproducing the serial number
+exactly, near-linear scaling to the core count, and flat allocations per
+operation — the extra time in the serial case is syscalls and scheduling, not
+the database.
 
 ```text
-BenchmarkTcpGetParallel         	  120766	     19324 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-2       	  212628	     10993 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-4       	  375663	      6485 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-8       	  640900	      3767 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-16      	  877633	      2632 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-64      	 1000000	      2272 ns/op	      65 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-256     	  686966	      3364 ns/op	      70 B/op	       8 allocs/op
+BenchmarkTcpGetParallel         	     19324 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-2       	     10993 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-4       	      6485 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-8       	      3767 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-16      	      2632 ns/op	      64 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-64      	      2272 ns/op	      65 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-256     	      3364 ns/op	      70 B/op	       8 allocs/op
 ```
 
-TCP load test (historical, `go run ./cmd/bench`):
+Because the server only flushes before a read that would block, a client that
+pipelines commands collects many replies per write syscall. Measured with 50
+connections at the depth shown, before and after that change:
 
 ```text
-Running 10s GET test @ 127.0.0.1:23466
+depth   GET before      GET after
+1         289k req/s      295k req/s
+8         752k req/s     1.90M req/s
+64        914k req/s     7.34M req/s
+```
+
+### Load tests (older builds)
+
+The figures below predate the pipelining and fsync work and have not been
+re-measured on a quiet machine; treat them as indicative only.
+
+```text
+Running 10s GET test @ localhost:23466
   500 connections
-  Stats		Avg		Min		Max
-  Latency	659.187µs	13.841777ms	17.172µs
-  4928439 requests in 10.000008278s
+  Latency	659.187µs avg
 Requests/sec: 492843.59
 
-Running 10s SET test @ 127.0.0.1:23466
+Running 10s SET test @ localhost:23466
   100 connections
-  Stats		Avg		Min		Max
-  Latency	300.293µs	2.8153ms	18.214µs
-  2874593 requests in 10.000167975s
+  Latency	300.293µs avg
 Requests/sec: 287454.47
-
-Running 10s DELETE test @ 127.0.0.1:23466
-  100 connections
-  Stats		Avg		Min		Max
-  Latency	237.16µs	3.515856ms	17.332µs
-  3393076 requests in 10.000016297s
-Requests/sec: 339307.05
 ```
 
-### HTTP
-
-`wrk -t4 -d10s` against `http://127.0.0.1:23556/db/bench`. With only 10 connections the
-client, not the server, is the bottleneck; raising it to 200 gives roughly 1.5–1.8x the
-throughput.
-
-10 connections:
-
 ```text
-Running 10s GET test @ http://127.0.0.1:23556/db/bench
-  4 threads and 10 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    41.42us   27.25us    2.29ms   97.63%
-    Req/Sec    45.64k     3.60k   49.78k    80.69%
-  1834071 requests in 10.10s, 197.65MB read
-Requests/sec: 181601.69
-Transfer/sec:     19.57MB
-
-Running 10s SET test @ http://127.0.0.1:23556/db/bench
-  4 threads and 10 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    59.03us   65.95us    4.62ms   98.23%
-    Req/Sec    33.66k     4.17k   39.86k    70.05%
-  1352492 requests in 10.10s, 180.58MB read
-Requests/sec: 133910.28
-Transfer/sec:     17.88MB
-
-Running 10s DELETE test @ http://127.0.0.1:23556/db/bench
-  4 threads and 10 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency    50.37us   37.11us    3.05ms   98.15%
-    Req/Sec    38.21k     1.95k   42.11k    70.30%
-  1535204 requests in 10.10s, 204.97MB read
-Requests/sec: 152003.32
-Transfer/sec:     20.29MB
-```
-
-200 connections:
-
-```text
-Running 10s GET test @ http://127.0.0.1:23556/db/bench
+Running 10s GET test @ http://localhost:23456/db/bench
   4 threads and 200 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   429.73us  197.50us    7.07ms   80.69%
-    Req/Sec    66.40k     1.90k   73.02k    67.00%
-  2642864 requests in 10.03s, 269.69MB read
+  Latency   429.73us
 Requests/sec: 263504.53
-Transfer/sec:     26.89MB
 
-Running 10s SET test @ http://127.0.0.1:23556/db/bench
+Running 10s SET test @ http://localhost:23456/db/bench
   4 threads and 200 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   529.52us  473.32us   15.81ms   93.63%
-    Req/Sec    60.36k     2.38k   68.74k    70.75%
-  2402580 requests in 10.03s, 320.78MB read
+  Latency   529.52us
 Requests/sec: 239501.39
-Transfer/sec:     31.98MB
-
-Running 10s DELETE test @ http://127.0.0.1:23556/db/bench
-  4 threads and 200 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   503.34us  405.45us   10.73ms   92.91%
-    Req/Sec    61.53k     2.58k   68.32k    64.50%
-  2448629 requests in 10.03s, 326.93MB read
-Requests/sec: 244092.76
-Transfer/sec:     32.59MB
 ```
-
-HTTP tops out lower than the raw TCP protocol mainly because of response size: the wrk runs
-average ~105 bytes per response (status line, `Date`, `Content-Length`, `Content-Type`),
-while the TCP GET reply is `$6\n"mark"\n` — 10 bytes.
 
 ## Quick Start
 
@@ -231,11 +208,11 @@ Endpoints:
 Examples:
 
 ```bash
-curl -s -X PUT http://127.0.0.1:23456/db/product.name -d '"Demo"'
-curl -s -X PUT http://127.0.0.1:23456/db/product.year -d '2026'
-curl -s http://127.0.0.1:23456/db/product
-curl -s -X DELETE http://127.0.0.1:23456/db/product.year
-curl -s -X POST http://127.0.0.1:23456/clone/product.name/product.alias
+curl -s -X PUT http://localhost:23456/db/product.name -d '"Demo"'
+curl -s -X PUT http://localhost:23456/db/product.year -d '2026'
+curl -s http://localhost:23456/db/product
+curl -s -X DELETE http://localhost:23456/db/product.year
+curl -s -X POST http://localhost:23456/clone/product.name/product.alias
 ```
 
 Original example (httpie):
