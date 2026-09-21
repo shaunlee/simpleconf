@@ -9,7 +9,9 @@ import (
 
 func resetConfig() {
 	configMu.Lock()
-	configuration = "{}"
+	configuration = []byte("{}")
+	configSnapshot = "{}"
+	configStale = false
 	configMu.Unlock()
 }
 

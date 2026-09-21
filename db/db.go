@@ -69,10 +69,18 @@ func SetFsyncPolicy(p FsyncPolicy) {
 var (
 	fsyncPolicy = FsyncEverysec
 
-	dbfn          string
-	db            *os.File
-	configuration = "{}"
-	configMu      sync.RWMutex
+	dbfn string
+	db   *os.File
+	// configuration is the mutable master copy, updated in place where sjson
+	// can manage it. configSnapshot is an immutable string view handed to
+	// readers, rebuilt lazily after a write; because it is a copy, a value a
+	// reader already holds can never be changed underneath it.
+	configuration  = []byte("{}")
+	configSnapshot = "{}"
+	configStale    bool
+	configMu       sync.RWMutex
+
+	inPlace = &sjson.Options{Optimistic: true, ReplaceInPlace: true}
 
 	wg          sync.WaitGroup
 	persists    = make(chan persistable, 1024)
@@ -89,7 +97,8 @@ func DisableAOF() {
 func setonly(k string, v any) (err error) {
 	configMu.Lock()
 	defer configMu.Unlock()
-	configuration, err = sjson.Set(configuration, k, v)
+	configuration, err = sjson.SetBytesOptions(configuration, k, v, inPlace)
+	configStale = true
 	return
 }
 
@@ -105,7 +114,8 @@ func Set(k string, v any) error {
 func delonly(k string) {
 	configMu.Lock()
 	defer configMu.Unlock()
-	configuration, _ = sjson.Delete(configuration, k)
+	configuration, _ = sjson.DeleteBytes(configuration, k)
+	configStale = true
 }
 
 func Del(k string) {
@@ -115,12 +125,28 @@ func Del(k string) {
 
 func Get(k string) string {
 	configMu.RLock()
-	defer configMu.RUnlock()
-
-	if len(k) == 0 {
-		return configuration
+	if !configStale {
+		snapshot := configSnapshot
+		configMu.RUnlock()
+		return lookup(snapshot, k)
 	}
-	return gjson.Get(configuration, k).Raw
+	configMu.RUnlock()
+
+	configMu.Lock()
+	if configStale {
+		configSnapshot = string(configuration)
+		configStale = false
+	}
+	snapshot := configSnapshot
+	configMu.Unlock()
+	return lookup(snapshot, k)
+}
+
+func lookup(snapshot, k string) string {
+	if len(k) == 0 {
+		return snapshot
+	}
+	return gjson.Get(snapshot, k).Raw
 }
 
 func Replace(raw string) error {
@@ -130,7 +156,9 @@ func Replace(raw string) error {
 	}
 
 	configMu.Lock()
-	configuration = raw
+	configuration = []byte(raw)
+	configSnapshot = raw
+	configStale = false
 	configMu.Unlock()
 	return nil
 }
@@ -140,9 +168,10 @@ func Replace(raw string) error {
 func cloneonly(fk, tk string) string {
 	configMu.Lock()
 	defer configMu.Unlock()
-	v := gjson.Get(configuration, fk).Raw
+	v := gjson.GetBytes(configuration, fk).Raw
 	if len(v) > 0 {
-		configuration, _ = sjson.SetRaw(configuration, tk, v)
+		configuration, _ = sjson.SetRawBytesOptions(configuration, tk, []byte(v), inPlace)
+		configStale = true
 	}
 	return v
 }
@@ -197,7 +226,8 @@ func Init(dir string) {
 					break loop
 				} else {
 					configMu.Lock()
-					configuration, _ = sjson.SetRaw(configuration, string(kl[1:]), string(vl))
+					configuration, _ = sjson.SetRawBytes(configuration, string(kl[1:]), vl)
+					configStale = true
 					configMu.Unlock()
 				}
 			case '*':
@@ -205,7 +235,8 @@ func Init(dir string) {
 					break loop
 				} else {
 					configMu.Lock()
-					configuration = string(vl)
+					configuration = append(configuration[:0], vl...)
+					configStale = true
 					configMu.Unlock()
 				}
 			case '-':
@@ -271,7 +302,7 @@ func doEraseAndDump() {
 	}
 
 	configMu.RLock()
-	snapshot := configuration
+	snapshot := string(configuration)
 	configMu.RUnlock()
 
 	fmt.Fprintf(db, "*\n%s\n", snapshot)
