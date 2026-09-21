@@ -46,8 +46,15 @@ BenchmarkDocSize/60KB/Set_last-16      	       242.1 ns/op	     136 B/op
 ```
 
 Two costs still grow with the document: rebuilding the snapshot after a write,
-paid on the next whole-document read, and holding the tree, which takes roughly
-five times the document's own size — about 776 KB for a 60 KB document.
+paid on the next whole-document read, and holding the tree, which takes about
+ten times the document's own size against roughly two for the single string it
+replaced. `go test ./db/ -run TestFootprint -v` reports both:
+
+```text
+600B   doc=   576B | tree=  4864B (8.4x doc)  | string+snapshot=  1236B (2.1x doc)
+6KB    doc=  6400B | tree= 70954B (11.1x doc) | string+snapshot= 13146B (2.1x doc)
+60KB   doc= 68280B | tree=720164B (10.5x doc) | string+snapshot=147548B (2.2x doc)
+```
 
 Earlier releases held the document as one JSON string. Reads of an early key
 were constant-time, but everything else was proportional to the key's offset:
