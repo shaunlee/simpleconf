@@ -17,42 +17,43 @@ Pure function calls against the in-memory document — no syscalls, no network.
 
 ```text
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkGet-16      	48848946	        48.02 ns/op	       0 B/op	       0 allocs/op
-BenchmarkSet-16      	12734566	       189.0 ns/op	      96 B/op	       3 allocs/op
-BenchmarkDel-16      	16635156	       135.3 ns/op	      80 B/op	       3 allocs/op
-BenchmarkClone-16    	 9288730	       261.9 ns/op	     168 B/op	       4 allocs/op
+BenchmarkGet-16      	22905945	       101.5 ns/op	      80 B/op	       3 allocs/op
+BenchmarkSet-16      	 9461450	       241.6 ns/op	     136 B/op	       8 allocs/op
+BenchmarkDel-16      	29906817	        73.41 ns/op	      69 B/op	       2 allocs/op
+BenchmarkClone-16    	 7213230	       347.4 ns/op	     216 B/op	      11 allocs/op
 ```
 
 ### Scaling with document size
 
-The document is held as a single JSON string, read with `gjson` and rewritten
-with `sjson`. That makes reads of an early key constant-time regardless of
-document size, but two costs grow:
-
-- `Get` scans from the start, so a key late in the document costs proportionally
-  to its offset.
-- `Set` rebuilds the whole string, so it costs — and allocates — proportionally
-  to the document size.
+The document is held as a tree of ordered objects, arrays and raw scalar
+leaves, so a keyed read or write costs O(depth). It does not depend on how
+large the document is, nor on where in it the key sits. Whole-document reads
+are served from a snapshot that is rebuilt only after a write.
 
 ```text
-BenchmarkDocSize/60B/Get_first-16      	        94.20 ns/op
-BenchmarkDocSize/60B/Get_last-16       	        93.20 ns/op
-BenchmarkDocSize/60B/Set-16            	       433.5 ns/op	     256 B/op
-BenchmarkDocSize/591B/Get_last-16      	       370.9 ns/op
-BenchmarkDocSize/591B/Set-16           	       674.7 ns/op	    1384 B/op
-BenchmarkDocSize/5991B/Get_last-16     	      3168 ns/op
-BenchmarkDocSize/5991B/Set-16          	      1774 ns/op	   12520 B/op
-BenchmarkDocSize/60891B/Get_first-16   	        94.45 ns/op
-BenchmarkDocSize/60891B/Get_last-16    	     31213 ns/op
-BenchmarkDocSize/60891B/Set-16         	     13767 ns/op	  131305 B/op
+BenchmarkDocSize/60B/Get_first-16      	        98.73 ns/op	      80 B/op
+BenchmarkDocSize/60B/Get_last-16       	        95.41 ns/op	      80 B/op
+BenchmarkDocSize/60B/Get_whole-16      	         5.60 ns/op	       0 B/op
+BenchmarkDocSize/60B/Set_last-16       	       231.8 ns/op	     136 B/op
+BenchmarkDocSize/600B/Get_last-16      	        99.37 ns/op	      80 B/op
+BenchmarkDocSize/600B/Set_last-16      	       241.8 ns/op	     136 B/op
+BenchmarkDocSize/6KB/Get_last-16       	        98.52 ns/op	      80 B/op
+BenchmarkDocSize/6KB/Set_last-16       	       238.9 ns/op	     136 B/op
+BenchmarkDocSize/60KB/Get_first-16     	       109.6 ns/op	      80 B/op
+BenchmarkDocSize/60KB/Get_last-16      	       103.3 ns/op	      80 B/op
+BenchmarkDocSize/60KB/Get_whole-16     	         5.61 ns/op	       0 B/op
+BenchmarkDocSize/60KB/Set_last-16      	       242.1 ns/op	     136 B/op
 ```
 
-This suits a configuration service, where documents are small and writes are
-rare, and it is what buys the zero-allocation `Get`. It is a poor fit for a
-large, write-heavy document: at 60 KB a write costs 13.8 µs and discards 131 KB.
-The representation is also what provides the `gjson`/`sjson` key-path semantics
-the API exposes — array indexing (`svc.ports.1`), appending and padding, index
-deletion with shifting, and escaped dots (`m.x\.y`).
+Two costs still grow with the document: rebuilding the snapshot after a write,
+paid on the next whole-document read, and holding the tree, which takes roughly
+five times the document's own size — about 776 KB for a 60 KB document.
+
+Earlier releases held the document as one JSON string. Reads of an early key
+were constant-time, but everything else was proportional to the key's offset:
+at 60 KB, reading the last key cost 31 µs and rewriting it 14 µs. It also meant
+inserting an unrelated key near the front of the document slowed down every key
+behind it. Both properties are gone.
 
 ### TCP protocol
 
@@ -63,51 +64,39 @@ goroutine.
 
 ```text
 cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkTcpGet-16              	  121798	     19978 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpSet-16              	  116130	     20378 ns/op	     176 B/op	      11 allocs/op
-BenchmarkTcpDel-16              	  111019	     20064 ns/op	     104 B/op	       7 allocs/op
-BenchmarkTcpClone-16            	  114981	     20104 ns/op	     232 B/op	      11 allocs/op
+BenchmarkTcpGet-16              	  118412	     19916 ns/op	     144 B/op	      11 allocs/op
+BenchmarkTcpSet-16              	  115828	     20311 ns/op	     224 B/op	      16 allocs/op
+BenchmarkTcpDel-16              	  124525	     19421 ns/op	      96 B/op	       6 allocs/op
+BenchmarkTcpClone-16            	  120098	     20226 ns/op	     280 B/op	      18 allocs/op
 
-BenchmarkTcpGetParallel-16      	  912423	      2707 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpSetParallel-16      	  882728	      2875 ns/op	     227 B/op	      12 allocs/op
-BenchmarkTcpDelParallel-16      	  764455	      3268 ns/op	     128 B/op	       7 allocs/op
-BenchmarkTcpCloneParallel-16    	  696648	      3106 ns/op	     217 B/op	      12 allocs/op
-```
-
-A `-cpu` sweep of the parallel GET shows `-cpu 1` reproducing the serial number
-exactly, near-linear scaling to the core count, and flat allocations per
-operation — the extra time in the serial case is syscalls and scheduling, not
-the database.
-
-```text
-BenchmarkTcpGetParallel         	     19324 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-2       	     10993 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-4       	      6485 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-8       	      3767 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-16      	      2632 ns/op	      64 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-64      	      2272 ns/op	      65 B/op	       8 allocs/op
-BenchmarkTcpGetParallel-256     	      3364 ns/op	      70 B/op	       8 allocs/op
+BenchmarkTcpGetParallel-16      	  907545	      2671 ns/op	     142 B/op	      11 allocs/op
+BenchmarkTcpSetParallel-16      	  910816	      2624 ns/op	     221 B/op	      16 allocs/op
+BenchmarkTcpDelParallel-16      	  830340	      2833 ns/op	     101 B/op	       6 allocs/op
+BenchmarkTcpCloneParallel-16    	  774948	      2898 ns/op	     274 B/op	      18 allocs/op
 ```
 
 Because the server only flushes before a read that would block, a client that
 pipelines commands collects many replies per write syscall. Measured with 50
-connections, `db.fsync: everysec`, data directory on tmpfs:
+connections and `db.fsync: everysec`, against a 16-byte document and a 21.8 KB
+one — the figures track each other, which is the point of the representation:
 
 ```text
-depth   GET             SET
-1         339k req/s      286k req/s
-8        2.12M req/s      693k req/s
-64       8.33M req/s     1.14M req/s
+          16 B document          21.8 KB document
+depth     GET        SET         GET        SET
+1          322k/s     276k/s      307k/s     286k/s
+8         1.95M/s     783k/s     2.14M/s     818k/s
+64        5.97M/s    1.22M/s     5.96M/s    1.24M/s
 ```
 
 ### HTTP
 
-`wrk -t4`, same configuration:
+`wrk -t4`, same configuration and the same two documents:
 
 ```text
-connections   GET             SET             DEL
-10             173k req/s      134k req/s      143k req/s
-200            256k req/s      237k req/s      241k req/s
+              16 B document              21.8 KB document
+conns    GET      SET      DEL      GET      SET      DEL
+10        144k     115k     120k     146k     116k     125k
+200       246k     230k     237k     246k     222k     234k
 ```
 
 HTTP tops out below the raw TCP protocol mainly because of response size: a
@@ -176,6 +165,61 @@ ext4/NVMe, SET throughput measured 19.5k/s under `always` against 237k/s under
 `everysec` and `no` both survive `kill -9`, because the writer flushes each
 batch to the kernel before going idle; they differ only in exposure to power
 loss.
+
+## Key Paths
+
+A key path selects a value inside the document. Segments are separated by `.`;
+a `\` escapes the next character, so a key containing a literal dot is written
+`fav\.movie`.
+
+```bash
+curl -s localhost:23456/db/name.first
+curl -s localhost:23456/db/friends.0.last
+curl -s 'localhost:23456/db/fav\.movie'
+```
+
+Reads also accept [gjson](https://github.com/tidwall/gjson) query syntax:
+
+| Path | Meaning |
+| --- | --- |
+| `friends.#` | number of elements |
+| `friends.#.first` | that field from every element |
+| `friends.#(age>45)` | the first element matching |
+| `friends.#(age>45)#` | every element matching |
+| `friends.#(age>45)#.first` | that field from every match |
+| `friends.#(first%"D*")#` | `%` matches a pattern, `!%` negates it |
+| `fri*`, `n?me` | `*` matches any run of characters, `?` exactly one |
+
+Comparisons accept `==`, `=`, `!=`, `<`, `<=`, `>` and `>=`. A bare path such
+as `#(first)` tests that the field exists, and `#(!first)` that it does not.
+gjson's `@modifiers` and `|` pipes are not supported.
+
+```text
+=friends.#                  $1
+                            3
+=friends.#(age>45)#.first   $16
+                            ["Roger","Jane"]
+```
+
+Note that `#` and `?` cannot be used over HTTP. The key is taken from the URL
+path without percent-decoding, so `%23` stays `%23` rather than becoming `#`,
+and an unencoded `#` or `?` is consumed by the client as a fragment or query
+string. Queries using them are reachable over the TCP protocol only; `*`
+works over both.
+
+Writes take plain paths, with two extras from
+[sjson](https://github.com/tidwall/sjson): an index past the end of an array
+pads it with `null`, and index `-1` appends.
+
+```bash
+curl -s -X PUT localhost:23456/db/ports -d '[80,443]'
+curl -s -X PUT localhost:23456/db/ports.5 -d '8080'
+curl -s localhost:23456/db/ports      # [80,443,null,null,null,8080]
+curl -s -X PUT localhost:23456/db/ports.-1 -d '9090'
+curl -s localhost:23456/db/ports      # [80,443,null,null,null,8080,9090]
+curl -s -X DELETE localhost:23456/db/ports.0
+curl -s localhost:23456/db/ports      # [443,null,null,null,8080,9090]
+```
 
 ## HTTP Usage
 
