@@ -25,11 +25,13 @@ func New() *Server {
 }
 
 func (p *Server) Listen(addr string) error {
-	raddr, err := net.ResolveTCPAddr("tcp4", addr)
+	// "tcp" rather than "tcp4" so a wildcard address listens on both stacks:
+	// localhost resolves to ::1 first on plenty of systems.
+	raddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return err
 	}
-	lc, err := net.ListenTCP("tcp4", raddr)
+	lc, err := net.ListenTCP("tcp", raddr)
 	if err != nil {
 		return err
 	}
