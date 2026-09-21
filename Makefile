@@ -2,15 +2,15 @@ PKGS := $(shell go list ./...)
 
 .PHONY: dev
 dev:
-	TCP_LISTEN=:23466 go run ./cmd/bin/main.go
+	TCP_LISTEN=:23466 go run ./cmd/simpleconf
 
 .PHONY: bench
 bench:
-	go run ./cmd/bench/main.go
+	go run ./cmd/simpleconf-bench
 
 .PHONY: build
 build:
-	CGO_ENABLED=0 GOEXPIREMENT=greenteagc go build -ldflags="-s -w" -a -v -o simpleconf ./cmd/bin/main.go
+	CGO_ENABLED=0 GOEXPIREMENT=greenteagc go build -ldflags="-s -w" -a -v -o simpleconf ./cmd/simpleconf
 
 .PHONY: test
 test:

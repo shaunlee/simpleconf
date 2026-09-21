@@ -1,12 +1,12 @@
-package server
+package tcpapi
 
 import (
 	"bufio"
 	"bytes"
 	"fmt"
 	"github.com/goccy/go-json"
-	"github.com/shaunlee/simpleconf/cluster"
-	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/internal/cluster"
+	"github.com/shaunlee/simpleconf/internal/db"
 	"net"
 	"strconv"
 	"sync"

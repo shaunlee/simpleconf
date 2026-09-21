@@ -1,4 +1,4 @@
-package server
+package tcpapi
 
 import (
 	"bufio"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/internal/db"
 )
 
 var (

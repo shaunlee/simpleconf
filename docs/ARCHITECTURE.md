@@ -17,5 +17,5 @@
 
 ## Durability
 
-- DB data is persisted by the `db` package append-only file.
-- Raft metadata/log state is persisted by `cluster/fileStore` under `db.dir/raft`.
+- DB data is persisted by the `internal/db` package append-only file.
+- Raft metadata/log state is persisted by `internal/cluster` (`fileStore`) under `db.dir/raft`.

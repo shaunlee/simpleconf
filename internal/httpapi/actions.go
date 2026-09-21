@@ -1,10 +1,10 @@
-package actions
+package httpapi
 
 import (
 	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v3"
-	"github.com/shaunlee/simpleconf/cluster"
-	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/internal/cluster"
+	"github.com/shaunlee/simpleconf/internal/db"
 )
 
 func whole(c fiber.Ctx) error {

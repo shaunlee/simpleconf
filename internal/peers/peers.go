@@ -7,7 +7,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/recover"
-	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/internal/db"
 )
 
 var (

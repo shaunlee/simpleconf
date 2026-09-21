@@ -78,7 +78,7 @@ BenchmarkDocSize/60KB/Set_last-16   	  5909949	       216.6 ns/op	      80 B/op	
 Two costs still grow with the document: rebuilding the snapshot after a write,
 paid on the next whole-document read, and holding the tree, which takes about
 ten times the document's own size against roughly two for the single string it
-replaced. `go test ./db/ -run TestFootprint -v` reports both:
+replaced. `go test ./internal/db/ -run TestFootprint -v` reports both:
 
 ```text
 600B   doc=   576B | tree=  4864B (8.4x doc)  | string+snapshot=  1236B (2.1x doc)
@@ -94,7 +94,7 @@ behind it. Both properties are gone.
 
 ### TCP protocol
 
-`go test ./server/ -bench Tcp`. The serial benchmarks use a single connection
+`go test ./internal/tcpapi/ -bench Tcp`. The serial benchmarks use a single connection
 with a strict request → response ping-pong, so they measure **round-trip
 latency**, not throughput. The `*Parallel` variants use one connection per
 goroutine.
@@ -121,7 +121,7 @@ Requirements:
 Run:
 
 ```bash
-go run ./cmd/bin/main.go
+go run ./cmd/simpleconf
 ```
 
 By default, HTTP listens on `:23456`.

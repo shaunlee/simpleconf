@@ -1,12 +1,13 @@
 # Project Structure
 
-- `cmd/bin`: main application entrypoint.
-- `cmd/bench`: benchmark/utility entrypoint.
-- `actions`: HTTP API handlers (Fiber).
-- `server`: TCP protocol server.
-- `cluster`: Raft coordination and persistence abstractions.
-- `db`: local append-only configuration storage engine.
-- `peers`: legacy peer sync mode (used when Raft is disabled).
+- `cmd/simpleconf`: the service entrypoint; wires configuration to the packages below.
+- `cmd/simpleconf-bench`: TCP load generator.
+- `internal/config`: loads `configs/config.yml` and environment overrides.
+- `internal/db`: in-memory document tree and append-only file.
+- `internal/cluster`: Raft coordination; every write goes through `cluster.Apply*`.
+- `internal/httpapi`: HTTP API (Fiber).
+- `internal/tcpapi`: line-based TCP protocol.
+- `internal/peers`: legacy peer sync, used when Raft is disabled.
 - `configs/examples`: runnable configuration examples.
 - `docker`: container packaging files.
 - `docs`: architecture and repository documentation.

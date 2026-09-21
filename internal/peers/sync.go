@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/internal/db"
 )
 
 const (

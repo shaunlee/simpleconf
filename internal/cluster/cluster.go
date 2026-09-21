@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/hashicorp/raft"
-	"github.com/shaunlee/simpleconf/db"
+	"github.com/shaunlee/simpleconf/internal/db"
 	"io"
 	"log"
 	"net"

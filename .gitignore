@@ -2,7 +2,6 @@
 *.tmp
 simpleconf
 simpleconf*
-go.sum
 
 # Runtime data files
 data/*.aof

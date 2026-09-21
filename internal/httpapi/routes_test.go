@@ -1,4 +1,4 @@
-package actions
+package httpapi
 
 import (
 	"io"
