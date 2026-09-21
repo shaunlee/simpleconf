@@ -10,7 +10,7 @@ bench:
 
 .PHONY: build
 build:
-	CGO_ENABLED=0 GOEXPIREMENT=greenteagc go build -ldflags="-s -w" -a -v -o simpleconf ./cmd/simpleconf
+	CGO_ENABLED=0 GOEXPERIMENT=greenteagc go build -ldflags="-s -w" -a -v -o simpleconf ./cmd/simpleconf
 
 .PHONY: test
 test:
