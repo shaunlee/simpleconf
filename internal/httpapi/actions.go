@@ -1,7 +1,8 @@
 package httpapi
 
 import (
-	"github.com/goccy/go-json"
+	"errors"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/shaunlee/simpleconf/internal/cluster"
 	"github.com/shaunlee/simpleconf/internal/db"
@@ -18,13 +19,12 @@ func single(c fiber.Ctx) error {
 }
 
 func update(c fiber.Ctx) error {
-	var v any
-	if err := json.Unmarshal(c.Body(), &v); err != nil {
-		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
-	}
 	k := c.Params("key")
-
-	if err := cluster.ApplySet(k, v); err != nil {
+	if err := cluster.ApplySetRaw(k, c.Body()); err != nil {
+		var je *db.JSONError
+		if errors.As(err, &je) {
+			return c.Status(422).JSON(fiber.Map{"error": je.Error()})
+		}
 		if nl, ok := cluster.AsNotLeader(err); ok {
 			return c.Status(409).JSON(fiber.Map{"error": "not leader", "leader": nl.LeaderHTTPAddr})
 		}

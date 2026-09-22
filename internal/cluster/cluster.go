@@ -197,6 +197,56 @@ func ApplySet(key string, value any) error {
 	return getDefault().ApplySet(key, value)
 }
 
+// ApplySetRaw writes JSON text from a client. With Raft disabled the bytes
+// are stored directly; a leader still decodes them into the existing log record.
+func ApplySetRaw(key string, raw []byte) error {
+	m := getDefault()
+	if !m.enabled || m.raft == nil {
+		return db.SetRaw(key, raw)
+	}
+	v, err := decodeJSON(raw)
+	if err != nil {
+		return &db.JSONError{Err: err}
+	}
+	return m.ApplySet(key, v)
+}
+
+// decodeJSON parses one JSON value and keeps numbers as json.Number.
+// A plain Unmarshal would turn 9007199254740993 into a float64 and round it.
+func decodeJSON(raw []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("extra data after JSON value")
+		}
+		return nil, err
+	}
+	return v, nil
+}
+
+func decodeCommand(raw []byte) (command, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var c command
+	if err := dec.Decode(&c); err != nil {
+		return command{}, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return command{}, fmt.Errorf("extra data after JSON value")
+		}
+		return command{}, err
+	}
+	return c, nil
+}
+
 func ApplyDelete(key string) error {
 	return getDefault().ApplyDelete(key)
 }
@@ -317,8 +367,8 @@ func normalizeHTTPAddr(addr string) string {
 type fsm struct{}
 
 func (f *fsm) Apply(logEntry *raft.Log) any {
-	var c command
-	if err := json.Unmarshal(logEntry.Data, &c); err != nil {
+	c, err := decodeCommand(logEntry.Data)
+	if err != nil {
 		return err
 	}
 	return applyLocal(c)

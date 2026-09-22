@@ -46,10 +46,25 @@ func (o *treeObj) set(k, raw string, v any) {
 		o.vals[i] = v
 		return
 	}
+	// Callers such as Fiber route params and gjson hand over strings that
+	// alias a buffer the next request will reuse. A key already in the tree
+	// has to own its bytes.
+	k = strings.Clone(k)
+	raw = strings.Clone(raw)
 	o.idx[k] = len(o.keys)
 	o.keys = append(o.keys, k)
 	o.raws = append(o.raws, raw)
 	o.vals = append(o.vals, v)
+}
+
+// put stores v at k. An existing key keeps its JSON text; quoting happens
+// only when the key is first inserted.
+func (o *treeObj) put(k string, v any) {
+	if i, ok := o.idx[k]; ok {
+		o.vals[i] = v
+		return
+	}
+	o.set(k, string(stringifyJSON(k)), v)
 }
 
 func (o *treeObj) del(k string) {
@@ -66,8 +81,9 @@ func (o *treeObj) del(k string) {
 	}
 }
 
-// treeLeaf is the raw JSON text of a scalar.
-type treeLeaf []byte
+// treeLeaf is the raw JSON text of a scalar. It is a string so a keyed read
+// can hand the text back without copying it.
+type treeLeaf string
 
 // ---- serialization ----
 
@@ -124,8 +140,79 @@ func parseTree(r gjson.Result) any {
 		})
 		return a
 	default:
-		return treeLeaf(r.Raw)
+		// Raw aliases the input buffer. A float is rewritten to the same
+		// decimal text Set stores, so an old log line like 1e+21 reloads as
+		// the value a live write would have kept. An integer is kept verbatim:
+		// float64 cannot hold 9007199254740993. Anything else is copied
+		// unchanged, including a string's own escape sequences.
+		if c, ok := canonicalNumberText(r.Raw); ok {
+			return treeLeaf(c)
+		}
+		return treeLeaf(strings.Clone(r.Raw))
 	}
+}
+
+// canonicalNumberText accepts a JSON number. Integers are returned unchanged.
+// Other numbers are rendered the way valueToNode renders a float64.
+func canonicalNumberText(raw string) (string, bool) {
+	if len(raw) == 0 || raw[0] == '"' {
+		return "", false
+	}
+	i := 0
+	if raw[0] == '-' {
+		i++
+		if i == len(raw) {
+			return "", false
+		}
+	}
+	if raw[i] < '0' || raw[i] > '9' {
+		return "", false
+	}
+	if raw[i] == '0' {
+		i++
+	} else {
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
+	}
+	frac := false
+	if i < len(raw) && raw[i] == '.' {
+		frac = true
+		i++
+		start := i
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return "", false
+		}
+	}
+	exp := false
+	if i < len(raw) && (raw[i] == 'e' || raw[i] == 'E') {
+		exp = true
+		i++
+		if i < len(raw) && (raw[i] == '+' || raw[i] == '-') {
+			i++
+		}
+		start := i
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return "", false
+		}
+	}
+	if i != len(raw) {
+		return "", false
+	}
+	if !frac && !exp {
+		return strings.Clone(raw), true
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return "", false
+	}
+	return string(strconv.AppendFloat(nil, f, 'f', -1, 64)), true
 }
 
 func parseTreeRaw(raw []byte) any { return parseTree(gjson.ParseBytes(raw)) }
@@ -204,7 +291,7 @@ func treeSet(n any, segs []string, val any) (any, error) {
 	switch c := n.(type) {
 	case *treeObj:
 		if last {
-			c.set(s, string(stringifyJSON(s)), val)
+			c.put(s, val)
 			return c, nil
 		}
 		child, ok := c.get(s)
@@ -215,7 +302,7 @@ func treeSet(n any, segs []string, val any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		c.set(s, string(stringifyJSON(s)), nc)
+		c.put(s, nc)
 		return c, nil
 	case []any:
 		if s == "-1" {
@@ -262,6 +349,140 @@ func isTreeContainer(n any) bool {
 	return false
 }
 
+// cutSeg splits one unescaped segment off path. The returned strings share
+// path's backing array, so a lookup does not allocate.
+func cutSeg(path string) (seg, rest string, last bool) {
+	i := strings.IndexByte(path, '.')
+	if i < 0 {
+		return path, "", true
+	}
+	return path[:i], path[i+1:], false
+}
+
+func treeLookupPath(n any, path string) (any, bool) {
+	if strings.IndexByte(path, '\\') >= 0 {
+		return treeLookup(n, splitTreePath(path))
+	}
+	for {
+		seg, rest, last := cutSeg(path)
+		switch c := n.(type) {
+		case *treeObj:
+			v, ok := c.get(seg)
+			if !ok {
+				return nil, false
+			}
+			n = v
+		case []any:
+			i, err := strconv.Atoi(seg)
+			if err != nil || i < 0 || i >= len(c) {
+				return nil, false
+			}
+			n = c[i]
+		default:
+			return nil, false
+		}
+		if last {
+			return n, true
+		}
+		path = rest
+	}
+}
+
+func treeSetPath(n any, path string, val any) (any, error) {
+	if strings.IndexByte(path, '\\') >= 0 {
+		return treeSet(n, splitTreePath(path), val)
+	}
+	return treeSetPlain(n, path, val)
+}
+
+func treeSetPlain(n any, path string, val any) (any, error) {
+	seg, rest, last := cutSeg(path)
+	switch c := n.(type) {
+	case *treeObj:
+		if last {
+			c.put(seg, val)
+			return c, nil
+		}
+		child, ok := c.get(seg)
+		if !ok || !isTreeContainer(child) {
+			child = newTreeObj()
+		}
+		nc, err := treeSetPlain(child, rest, val)
+		if err != nil {
+			return nil, err
+		}
+		c.put(seg, nc)
+		return c, nil
+	case []any:
+		if seg == "-1" {
+			if last {
+				return append(c, val), nil
+			}
+			nc, err := treeSetPlain(newTreeObj(), rest, val)
+			if err != nil {
+				return nil, err
+			}
+			return append(c, nc), nil
+		}
+		i, err := strconv.Atoi(seg)
+		if err != nil || i < 0 {
+			return nil, &pathError{"cannot set array element for non-numeric key '" + seg + "'"}
+		}
+		for len(c) <= i {
+			c = append(c, nil)
+		}
+		if last {
+			c[i] = val
+			return c, nil
+		}
+		child := c[i]
+		if !isTreeContainer(child) {
+			child = newTreeObj()
+		}
+		nc, err := treeSetPlain(child, rest, val)
+		if err != nil {
+			return nil, err
+		}
+		c[i] = nc
+		return c, nil
+	default:
+		return treeSetPlain(newTreeObj(), path, val)
+	}
+}
+
+func treeDelPath(n any, path string) any {
+	if strings.IndexByte(path, '\\') >= 0 {
+		return treeDel(n, splitTreePath(path))
+	}
+	return treeDelPlain(n, path)
+}
+
+func treeDelPlain(n any, path string) any {
+	seg, rest, last := cutSeg(path)
+	switch c := n.(type) {
+	case *treeObj:
+		if last {
+			c.del(seg)
+			return c
+		}
+		if child, ok := c.get(seg); ok {
+			c.put(seg, treeDelPlain(child, rest))
+		}
+		return c
+	case []any:
+		i, err := strconv.Atoi(seg)
+		if err != nil || i < 0 || i >= len(c) {
+			return c
+		}
+		if last {
+			return append(c[:i], c[i+1:]...)
+		}
+		c[i] = treeDelPlain(c[i], rest)
+		return c
+	}
+	return n
+}
+
 func treeDel(n any, segs []string) any {
 	s := segs[0]
 	last := len(segs) == 1
@@ -272,7 +493,7 @@ func treeDel(n any, segs []string) any {
 			return c
 		}
 		if child, ok := c.get(s); ok {
-			c.set(s, string(stringifyJSON(s)), treeDel(child, segs[1:]))
+			c.put(s, treeDel(child, segs[1:]))
 		}
 		return c
 	case []any:

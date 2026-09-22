@@ -2,14 +2,17 @@ package db
 
 import (
 	"bufio"
+	"bytes"
 	stdjson "encoding/json"
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/tidwall/gjson"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -147,25 +150,135 @@ func stringifyJSON(s string) []byte {
 			return b
 		}
 	}
-	b := make([]byte, 0, len(s)+2)
-	b = append(b, '"')
-	b = append(b, s...)
-	return append(b, '"')
+	b := make([]byte, len(s)+2)
+	b[0] = '"'
+	copy(b[1:], s)
+	b[len(b)-1] = '"'
+	return b
 }
 
-func setonly(k string, v any) error {
-	raw, err := rawJSON(v)
-	if err != nil {
-		return err
+// quoteJSONString is stringifyJSON for the common case of a plain string,
+// producing the canonical JSON text in one allocation.
+func quoteJSONString(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] < ' ' || s[i] > 0x7f || s[i] == '"' || s[i] == '\\' {
+			b, _ := stdjson.Marshal(s)
+			return string(b)
+		}
 	}
-	return setrawonly(k, raw)
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	b.WriteString(s)
+	b.WriteByte('"')
+	return b.String()
 }
 
-func setrawonly(k string, raw []byte) error {
-	val := parseTreeRaw(raw)
+// JSONError is bad JSON from a client write. Callers map it to 422.
+type JSONError struct{ Err error }
+
+func (e *JSONError) Error() string { return e.Err.Error() }
+func (e *JSONError) Unwrap() error { return e.Err }
+
+func valueToNode(v any) (any, error) {
+	switch v := v.(type) {
+	case nil:
+		return treeLeaf("null"), nil
+	case string:
+		return treeLeaf(quoteJSONString(v)), nil
+	case bool:
+		if v {
+			return treeLeaf("true"), nil
+		}
+		return treeLeaf("false"), nil
+	case int:
+		return treeLeaf(strconv.FormatInt(int64(v), 10)), nil
+	case int8:
+		return treeLeaf(strconv.FormatInt(int64(v), 10)), nil
+	case int16:
+		return treeLeaf(strconv.FormatInt(int64(v), 10)), nil
+	case int32:
+		return treeLeaf(strconv.FormatInt(int64(v), 10)), nil
+	case int64:
+		return treeLeaf(strconv.FormatInt(v, 10)), nil
+	case uint:
+		return treeLeaf(strconv.FormatUint(uint64(v), 10)), nil
+	case uint8:
+		return treeLeaf(strconv.FormatUint(uint64(v), 10)), nil
+	case uint16:
+		return treeLeaf(strconv.FormatUint(uint64(v), 10)), nil
+	case uint32:
+		return treeLeaf(strconv.FormatUint(uint64(v), 10)), nil
+	case uint64:
+		return treeLeaf(strconv.FormatUint(v, 10)), nil
+	case float32:
+		return treeLeaf(string(strconv.AppendFloat(nil, float64(v), 'f', -1, 64))), nil
+	case float64:
+		return treeLeaf(string(strconv.AppendFloat(nil, v, 'f', -1, 64))), nil
+	case json.Number:
+		if c, ok := canonicalNumberText(v.String()); ok {
+			return treeLeaf(c), nil
+		}
+		return nil, &JSONError{Err: fmt.Errorf("invalid number %s", v.String())}
+	default:
+		raw, err := rawJSON(v)
+		if err != nil {
+			return nil, err
+		}
+		return nodeFromRaw(raw), nil
+	}
+}
+
+// nodeFromRaw stores a scalar's text as a leaf. Objects and arrays are parsed
+// into the tree. The bytes are the canonical form produced by rawJSON, so the
+// leaf text matches what gjson would have kept.
+func nodeFromRaw(raw []byte) any {
+	if isJSONScalar(raw) {
+		if c, ok := canonicalNumberText(string(raw)); ok {
+			return treeLeaf(c)
+		}
+		return treeLeaf(string(raw))
+	}
+	return parseTreeRaw(raw)
+}
+
+func isJSONScalar(raw []byte) bool {
+	for _, c := range raw {
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			continue
+		}
+		return c != '{' && c != '['
+	}
+	return false
+}
+
+// canonicalScalar reports client JSON that is already in the form rawJSON
+// would emit: true, false, null, or a plain quoted string.
+func canonicalScalar(raw []byte) (treeLeaf, bool) {
+	switch {
+	case bytes.Equal(raw, []byte("true")):
+		return "true", true
+	case bytes.Equal(raw, []byte("false")):
+		return "false", true
+	case bytes.Equal(raw, []byte("null")):
+		return "null", true
+	}
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return "", false
+	}
+	for i := 1; i < len(raw)-1; i++ {
+		c := raw[i]
+		if c == '\\' || c == '"' || c < ' ' || c > 0x7f {
+			return "", false
+		}
+	}
+	return treeLeaf(string(raw)), true
+}
+
+func setNode(k string, val any) error {
 	configMu.Lock()
 	defer configMu.Unlock()
-	n, err := treeSet(configRoot, splitTreePath(k), val)
+	n, err := treeSetPath(configRoot, k, val)
 	if err != nil {
 		return err
 	}
@@ -174,19 +287,86 @@ func setrawonly(k string, raw []byte) error {
 	return nil
 }
 
-func Set(k string, v any) error {
-	if err := setonly(k, v); err != nil {
+func setonly(k string, v any) error {
+	val, err := valueToNode(v)
+	if err != nil {
 		return err
 	}
+	return setNode(k, val)
+}
 
-	appendAOF(persistable{command: setCmd, key: k, value: v})
+func setrawonly(k string, raw []byte) error {
+	return setNode(k, nodeFromRaw(raw))
+}
+
+// SetRaw writes client JSON. Plain scalars are stored in one copy; anything
+// else is decoded with json.Number so an integer is not rounded through float64.
+func SetRaw(k string, raw []byte) error {
+	raw = bytes.TrimSpace(raw)
+	if leaf, ok := canonicalScalar(raw); ok {
+		if err := setNode(k, leaf); err != nil {
+			return err
+		}
+		appendAOF(persistable{command: setRawCmd, key: k, value: string(leaf)})
+		return nil
+	}
+	v, err := decodeJSON(raw)
+	if err != nil {
+		return &JSONError{Err: err}
+	}
+	return Set(k, v)
+}
+
+// decodeJSON parses one JSON value. Numbers stay json.Number instead of float64.
+func decodeJSON(raw []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("extra data after JSON value")
+		}
+		return nil, err
+	}
+	return v, nil
+}
+
+func Set(k string, v any) error {
+	val, err := valueToNode(v)
+	if err != nil {
+		return err
+	}
+	// Render before setNode publishes the node. After that, another Set can
+	// change a child while this walk still reads the same object.
+	// Get(k) is also the wrong text for an append path such as arr.-1.
+	var text string
+	if aofEnabled {
+		text = storedText(val)
+	}
+	if err := setNode(k, val); err != nil {
+		return err
+	}
+	if aofEnabled {
+		appendAOF(persistable{command: setRawCmd, key: k, value: text})
+	}
 	return nil
+}
+
+func storedText(val any) string {
+	if leaf, ok := val.(treeLeaf); ok {
+		return string(leaf)
+	}
+	return string(appendTree(nil, val))
 }
 
 func delonly(k string) {
 	configMu.Lock()
 	defer configMu.Unlock()
-	configRoot = treeDel(configRoot, splitTreePath(k)).(*treeObj)
+	configRoot = treeDelPath(configRoot, k).(*treeObj)
 	configStale = true
 }
 
@@ -201,7 +381,7 @@ func Get(k string) string {
 	if len(k) > 0 && isPlainPath(k) {
 		configMu.RLock()
 		defer configMu.RUnlock()
-		n, ok := treeLookup(configRoot, splitTreePath(k))
+		n, ok := treeLookupPath(configRoot, k)
 		if !ok {
 			return ""
 		}
@@ -262,10 +442,18 @@ func Replace(raw string) error {
 // which is empty when the source does not exist.
 func cloneonly(fk, tk string) string {
 	configMu.Lock()
-	src, ok := treeLookup(configRoot, splitTreePath(fk))
+	src, ok := treeLookupPath(configRoot, fk)
 	if !ok {
 		configMu.Unlock()
 		return ""
+	}
+	if leaf, ok := src.(treeLeaf); ok {
+		configMu.Unlock()
+		// The leaf text is immutable, so the copy shares it.
+		if err := setNode(tk, leaf); err != nil {
+			return ""
+		}
+		return string(leaf)
 	}
 	raw := appendTree(nil, src)
 	configMu.Unlock()
@@ -295,6 +483,12 @@ func appendAOF(row persistable) {
 	if !aofEnabled {
 		return
 	}
+	// The writer runs after this call returns. Copy anything that might
+	// still point at a request buffer.
+	row.key = strings.Clone(row.key)
+	if s, ok := row.value.(string); ok {
+		row.value = strings.Clone(s)
+	}
 	if fsyncPolicy == FsyncAlways {
 		row.done = make(chan struct{})
 	}
@@ -307,6 +501,9 @@ func appendAOF(row persistable) {
 
 func Init(dir string) {
 	log.Println("init db ...")
+	// A second Init replaces the file. Stop the writer first so it is not
+	// still reading that file.
+	stopPersist()
 	dbfn = filepath.Join(dir, "data.aof")
 
 	if aofEnabled {
@@ -349,12 +546,6 @@ func Init(dir string) {
 			}
 		}
 	}
-
-	// A previous Init may have left a persist goroutine running (Close without
-	// exit=true does not stop it). Two consumers on the same channel race for
-	// the close command, and the loser's Close blocks on a persistExit that is
-	// never closed, so retire the old one first.
-	stopPersist()
 
 	persistExit = make(chan struct{})
 	go persist()
@@ -418,11 +609,11 @@ func Close(exit ...bool) {
 			Vacuum()
 			wg.Wait()
 		}
-
-		wg.Add(1)
-		persists <- persistable{command: closeCmd}
-		<-persistExit
 	}
+	// The writer goroutine reads db from its own loop. Stop it before closing
+	// the file; otherwise the two race, and a concurrent Set's log race is
+	// hidden behind this one.
+	stopPersist()
 
 	if db != nil {
 		db.Sync()

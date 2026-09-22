@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/goccy/go-json"
 	"github.com/shaunlee/simpleconf/internal/cluster"
 	"github.com/shaunlee/simpleconf/internal/db"
 	"net"
@@ -102,12 +101,7 @@ outer:
 					break outer
 				} else {
 					k := string(l[1:])
-					var v any
-					if err := json.Unmarshal(nl, &v); err != nil {
-						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-							break outer
-						}
-					} else if err := cluster.ApplySet(k, v); err != nil {
+					if err := cluster.ApplySetRaw(k, nl); err != nil {
 						if nl, ok := cluster.AsNotLeader(err); ok {
 							if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nl.LeaderHTTPAddr)); err != nil {
 								break outer
