@@ -8,8 +8,15 @@
 
 ## Benchmarks
 
-Measured on an AMD Ryzen 9 5900HX (16 logical cores, Linux), with the client on
-the same machine, so the throughput figures are conservative.
+Measured on an Apple M6 (12 logical cores, 32 GB), macOS 27.
+
+Everything that crosses a socket — both charts and the throughput tables
+below — was measured inside a Linux VM on this machine (OrbStack, Debian 12
+containers on host networking, data on VM-native volumes), with the client on
+the same machine. etcd, Consul and Valkey only run there, and macOS's loopback
+stack is several times slower than Linux's, so putting every server *and* every
+client in the VM is what keeps the comparison like for like. The in-memory
+benchmarks, which touch no socket, are native macOS.
 
 ### Compared with similar tools
 
@@ -20,17 +27,22 @@ official Docker images on the same machine with host networking.
 
 ![Native protocol throughput: simpleconf TCP, Valkey RESP](docs/images/bench-native.svg)
 
-The comparison is not like for like, and the gaps overstate the difference in
-implementation:
+Against Valkey the win is narrow and one-sided: simpleconf leads decisively
+only on pipelined reads, at 16.5M GET/s against 6.66M. Unpipelined, and on
+pipelined writes, Valkey is ahead.
+
+The comparison is not like for like, and the HTTP gaps in particular overstate
+the difference in implementation:
 
 - simpleconf and Valkey append to a file fsynced once a second; etcd and
   Consul replicate every write through Raft and fsync it before replying.
 - etcd is measured through its HTTP/JSON gateway, not its native gRPC API; a
-  local `serializable` read is no faster (30.9k/s), so the gateway is the limit.
+  local `serializable` read is no faster (42.2k/s), so the gateway is the limit.
 - Consul runs as a single server with data on disk, not in `-dev` mode.
-- Valkey is shown with the better of two settings: `--io-threads 4` at depth 1
-  (107k GET / 95k SET with the default single thread), the default at depth 64.
-  It executes commands on one thread, while simpleconf serves reads in parallel.
+- Valkey is shown with the better of two settings at each depth: `--io-threads
+  4` at depth 1 (545k GET / 480k SET with the default single thread), the
+  default at depth 64 (4.44M GET / 2.45M SET with `--io-threads 4`). It
+  executes commands on one thread, while simpleconf serves reads in parallel.
 - Valkey is driven by `valkey-benchmark --threads 8`, simpleconf by its own Go
   client, so the client overhead differs.
 
@@ -42,11 +54,11 @@ connections and `db.fsync: everysec`, against a 16-byte document and a 21.8 KB
 one — the figures track each other, which is the point of the representation:
 
 ```text
-          16 B document          21.8 KB document
-depth     GET        SET         GET        SET
-1          310k/s     253k/s      283k/s     239k/s
-8         2.03M/s     845k/s     2.05M/s     885k/s
-64        8.46M/s    1.28M/s     8.65M/s    1.44M/s
+          16 B document            21.8 KB document
+depth     GET        SET          GET        SET
+1          808k/s     681k/s       806k/s     682k/s
+8         5.65M/s    2.09M/s      5.67M/s    2.06M/s
+64       16.47M/s    2.76M/s     17.40M/s    3.06M/s
 ```
 
 ### HTTP
@@ -56,24 +68,25 @@ depth     GET        SET         GET        SET
 ```text
               16 B document                  21.8 KB document
 conns    GET       SET       DEL        GET       SET       DEL
-10       137k/s    110k/s    124k/s     153k/s    118k/s    124k/s
-200      237k/s    225k/s    233k/s     230k/s    221k/s    237k/s
+10       456k/s    493k/s    506k/s     442k/s    523k/s    530k/s
+200      1.02M/s   674k/s    707k/s     1.02M/s   708k/s    732k/s
 ```
 
-HTTP tops out below the raw TCP protocol mainly because of response size: a
-reply averages around 105 bytes of status line and headers, against 10 bytes
-for the TCP `GET` reply `$6\n"mark"\n`.
+With 200 connections HTTP GET edges past unpipelined TCP, but it stays far
+below a pipelined one, and for two reasons: HTTP has no pipelining, and a reply
+averages around 105 bytes of status line and headers against 10 bytes for the
+TCP `GET` reply `$6\n"mark"\n`.
 
 ### In-memory operations
 
 Pure function calls against the in-memory document — no syscalls, no network.
 
 ```text
-cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkGet-16      	18202971	        69.44 ns/op	      24 B/op	       2 allocs/op
-BenchmarkSet-16      	 5659772	       209.1 ns/op	      80 B/op	       7 allocs/op
-BenchmarkDel-16      	24196832	        49.55 ns/op	      16 B/op	       1 allocs/op
-BenchmarkClone-16    	 4524405	       269.1 ns/op	     104 B/op	       9 allocs/op
+cpu: Apple M6
+BenchmarkGet-12      	228148927	        10.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSet-12      	 82901794	        29.89 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDel-12      	270620913	         8.944 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClone-12    	 84426901	        28.84 ns/op	      16 B/op	       1 allocs/op
 ```
 
 ### Scaling with document size
@@ -84,18 +97,18 @@ large the document is, nor on where in it the key sits. Whole-document reads
 are served from a snapshot that is rebuilt only after a write.
 
 ```text
-BenchmarkDocSize/60B/Get_first-16   	 17567499	       72.06 ns/op	      24 B/op	       2 allocs/op
-BenchmarkDocSize/60B/Get_last-16    	 17037295	       69.59 ns/op	      24 B/op	       2 allocs/op
-BenchmarkDocSize/60B/Get_whole-16   	205617865	       5.824 ns/op	       0 B/op	       0 allocs/op
-BenchmarkDocSize/60B/Set_last-16    	  5832117	       206.6 ns/op	      80 B/op	       7 allocs/op
-BenchmarkDocSize/600B/Get_last-16   	 15943088	       72.83 ns/op	      24 B/op	       2 allocs/op
-BenchmarkDocSize/600B/Set_last-16   	  5669923	       207.9 ns/op	      80 B/op	       7 allocs/op
-BenchmarkDocSize/6KB/Get_last-16    	 16001305	       76.12 ns/op	      24 B/op	       2 allocs/op
-BenchmarkDocSize/6KB/Set_last-16    	  5620524	       203.7 ns/op	      80 B/op	       7 allocs/op
-BenchmarkDocSize/60KB/Get_first-16  	 15006763	       78.54 ns/op	      24 B/op	       2 allocs/op
-BenchmarkDocSize/60KB/Get_last-16   	 14920532	       77.65 ns/op	      24 B/op	       2 allocs/op
-BenchmarkDocSize/60KB/Get_whole-16  	212638714	       5.708 ns/op	       0 B/op	       0 allocs/op
-BenchmarkDocSize/60KB/Set_last-16   	  5909949	       216.6 ns/op	      80 B/op	       7 allocs/op
+BenchmarkDocSize/60B/Get_first-12   	209001240	        11.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/60B/Get_last-12    	204285433	        11.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/60B/Get_whole-12   	789801250	         3.048 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/60B/Set_last-12    	 80331366	        29.97 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/600B/Get_last-12   	185648116	        12.59 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/600B/Set_last-12   	 77537744	        30.38 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/6KB/Get_last-12    	206818244	        11.44 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/6KB/Set_last-12    	 81085989	        29.31 ns/op	      24 B/op	       2 allocs/op
+BenchmarkDocSize/60KB/Get_first-12  	198406594	        12.21 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/60KB/Get_last-12   	201218524	        11.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/60KB/Get_whole-12  	784765947	         3.069 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDocSize/60KB/Set_last-12   	 80557075	        29.65 ns/op	      24 B/op	       2 allocs/op
 ```
 
 Two costs still grow with the document: rebuilding the snapshot after a write,
@@ -104,16 +117,17 @@ ten times the document's own size against roughly two for the single string it
 replaced. `go test ./internal/db/ -run TestFootprint -v` reports both:
 
 ```text
-600B   doc=   576B | tree=  4864B (8.4x doc)  | string+snapshot=  1236B (2.1x doc)
-6KB    doc=  6400B | tree= 70954B (11.1x doc) | string+snapshot= 13146B (2.1x doc)
-60KB   doc= 68280B | tree=720164B (10.5x doc) | string+snapshot=147548B (2.2x doc)
+600B   doc=   576B | tree=  4207B (7.3x doc)  | string+snapshot=  1219B (2.1x doc) | tree/string=3.5x
+6KB    doc=  6400B | tree= 65156B (10.2x doc) | string+snapshot= 13129B (2.1x doc) | tree/string=5.0x
+60KB   doc= 68280B | tree=659775B (9.7x doc)  | string+snapshot=147534B (2.2x doc) | tree/string=4.5x
 ```
 
 Earlier releases held the document as one JSON string. Reads of an early key
 were constant-time, but everything else was proportional to the key's offset:
-at 60 KB, reading the last key cost 31 µs and rewriting it 14 µs. It also meant
-inserting an unrelated key near the front of the document slowed down every key
-behind it. Both properties are gone.
+at 60 KB, reading the last key cost 31 µs and rewriting it 14 µs (measured on
+the previous machine, against an implementation that no longer exists). It also
+meant inserting an unrelated key near the front of the document slowed down
+every key behind it. Both properties are gone.
 
 ### TCP protocol
 
@@ -123,16 +137,16 @@ latency**, not throughput. The `*Parallel` variants use one connection per
 goroutine.
 
 ```text
-cpu: AMD Ryzen 9 5900HX with Radeon Graphics
-BenchmarkTcpGet-16              	   62134	     20174 ns/op	      80 B/op	       8 allocs/op
-BenchmarkTcpSet-16              	   58096	     20083 ns/op	     168 B/op	      15 allocs/op
-BenchmarkTcpDel-16              	   63088	     19194 ns/op	      48 B/op	       5 allocs/op
-BenchmarkTcpClone-16            	   61641	     19933 ns/op	     168 B/op	      16 allocs/op
+cpu: Apple M6 (Linux VM)
+BenchmarkTcpGet-12              	  949948	      2540 ns/op	      56 B/op	       6 allocs/op
+BenchmarkTcpSet-12              	  931627	      2588 ns/op	      80 B/op	       8 allocs/op
+BenchmarkTcpDel-12              	  958932	      2520 ns/op	      32 B/op	       4 allocs/op
+BenchmarkTcpClone-12            	  928945	      2587 ns/op	      80 B/op	       8 allocs/op
 
-BenchmarkTcpGetParallel-16      	  459609	      2697 ns/op	      84 B/op	       8 allocs/op
-BenchmarkTcpSetParallel-16      	  457113	      2754 ns/op	     166 B/op	      15 allocs/op
-BenchmarkTcpDelParallel-16      	  450898	      2713 ns/op	      48 B/op	       5 allocs/op
-BenchmarkTcpCloneParallel-16    	  411650	      3157 ns/op	     169 B/op	      16 allocs/op
+BenchmarkTcpGetParallel-12      	 1779358	      1322 ns/op	      59 B/op	       6 allocs/op
+BenchmarkTcpSetParallel-12      	 1738848	      1353 ns/op	      83 B/op	       8 allocs/op
+BenchmarkTcpDelParallel-12      	 1780437	      1341 ns/op	      32 B/op	       4 allocs/op
+BenchmarkTcpCloneParallel-12    	 1747497	      1375 ns/op	      81 B/op	       8 allocs/op
 ```
 
 ## Quick Start
@@ -190,9 +204,19 @@ file is fsynced is controlled by `db.fsync`:
 | `no` | yes | lost until the OS flushes | none |
 
 Under `always` a successful `PUT`/`DELETE`/clone means the record is on disk;
-concurrent writers share one fsync through group commit. The cost is real: on
-ext4/NVMe, SET throughput measured 19.5k/s under `always` against 237k/s under
-`everysec`.
+concurrent writers share one fsync through group commit. The cost is real, and
+it is dominated by the storage underneath rather than by simpleconf. The same
+`wrk -t4 -c200` SET test, `always` against `everysec`:
+
+| Storage | `always` | `everysec` |
+| --- | --- | --- |
+| Linux VM volume (the benchmarks above) | 189k/s | 661k/s |
+| macOS APFS/NVMe, native | 24.6k/s | 186k/s |
+| ext4/NVMe, previous machine | 19.5k/s | 237k/s |
+
+A virtual disk makes fsync far cheaper than a physical one, so take the 3.5x
+ratio in the first row as the floor and the ~10x in the other two as what to
+expect on real hardware.
 
 `everysec` and `no` both survive `kill -9`, because the writer flushes each
 batch to the kernel before going idle; they differ only in exposure to power
