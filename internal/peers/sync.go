@@ -37,7 +37,28 @@ var (
 	// them while running, hence atomics.
 	retryBase = newDuration(100 * time.Millisecond)
 	retryCap  = newDuration(1500 * time.Millisecond)
+
+	// Replaced in tests to simulate a failing disk.
+	writeWAL = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
+	syncWAL  = func(f *os.File) error { return f.Sync() }
+
+	walPolicy    atomic.Int32 // a db.FsyncPolicy; the zero value is everysec
+	syncLoopOnce sync.Once
+	// Set by tests that count fsyncs, so a background tick does not add to
+	// them. Workers created after it is set are never seen by the loop.
+	syncLoopPaused atomic.Bool
 )
+
+// SetFsyncPolicy makes the WAL follow db.fsync, so the queue to the peers is
+// kept as safely as the local data: always fsyncs before the write is
+// answered, everysec once a second in the background, no leaves it to the OS.
+func SetFsyncPolicy(p db.FsyncPolicy) {
+	walPolicy.Store(int32(p))
+}
+
+func currentPolicy() db.FsyncPolicy {
+	return db.FsyncPolicy(walPolicy.Load())
+}
 
 func newDuration(d time.Duration) *atomic.Int64 {
 	v := new(atomic.Int64)
@@ -60,7 +81,15 @@ type workerState struct {
 	walPath string
 	pending []syncOp
 	walFile *os.File
-	writes  int
+	writes  int    // records in the WAL file, for checkpointEvery
+	seq     uint64 // E records appended so far, for syncTo
+	// needCheckpoint is set when a write or fsync to the WAL failed. The file
+	// may then lack records that pending holds, so nothing more is appended
+	// to it until checkpointLocked rewrites it from pending.
+	needCheckpoint bool
+
+	syncMu sync.Mutex    // one fsync at a time; later callers share the next
+	synced atomic.Uint64 // highest seq known to be on disk
 }
 
 var (
@@ -182,10 +211,66 @@ func SyncVacuum() {
 }
 
 func dispatch(op syncOp) {
+	type queued struct {
+		w   *workerState
+		seq uint64
+	}
+	var written []queued
 	for _, addr := range peerAddresses() {
 		w := workerFor(addr)
-		if err := w.enqueue(op); err != nil {
+		seq, err := w.enqueue(op)
+		if err != nil {
 			log.Println("failed to persist sync op", addr, err)
+			continue
+		}
+		written = append(written, queued{w, seq})
+	}
+	if currentPolicy() != db.FsyncAlways {
+		return
+	}
+	for _, q := range written {
+		if err := q.w.syncTo(q.seq); err != nil {
+			log.Println("failed to fsync sync op", q.w.addr, err)
+		}
+	}
+}
+
+func startSyncLoop() {
+	syncLoopOnce.Do(func() {
+		go func() {
+			for range time.Tick(time.Second) {
+				if !syncLoopPaused.Load() {
+					syncAll()
+				}
+			}
+		}()
+	})
+}
+
+// syncAll fsyncs each WAL written since the last call under everysec, and
+// retries the checkpoint of any WAL that a failed write left behind.
+func syncAll() {
+	workersMu.Lock()
+	ws := make([]*workerState, 0, len(workers))
+	for _, w := range workers {
+		ws = append(ws, w)
+	}
+	workersMu.Unlock()
+
+	everysec := currentPolicy() == db.FsyncEverysec
+	for _, w := range ws {
+		w.mu.Lock()
+		seq, broken := w.seq, w.needCheckpoint
+		var err error
+		if broken {
+			err = w.checkpointLocked()
+		}
+		w.mu.Unlock()
+		if !broken && everysec {
+			err = w.syncTo(seq)
+		}
+		if err != nil {
+			log.Println("failed to persist sync wal", w.addr, err)
 		}
 	}
 }
@@ -213,6 +298,7 @@ func workerFor(addr string) *workerState {
 		log.Println("failed to load wal", addr, err)
 	}
 	workers[addr] = w
+	startSyncLoop()
 	go w.run()
 	w.signal()
 	return w
@@ -270,26 +356,36 @@ func (w *workerState) loadWAL() error {
 	if err := w.ensureWALFileLocked(); err != nil {
 		return err
 	}
-	if int64(w.writes) >= atomic.LoadInt64(&walCheckpointEvery) {
+	if w.reclaimableLocked() {
 		return w.checkpointLocked()
 	}
 	return nil
 }
 
-func (w *workerState) enqueue(op syncOp) error {
+// enqueue queues op for the peer and appends it to the WAL, returning the
+// record's number for syncTo. If the WAL cannot take it, op stays queued, so
+// the peer still gets it while the process runs, and the error is returned.
+func (w *workerState) enqueue(op syncOp) (uint64, error) {
+	b, err := json.Marshal(op)
+	if err != nil {
+		return 0, err
+	}
+	rec := make([]byte, 0, len(b)+3)
+	rec = append(append(append(rec, "E "...), b...), '\n')
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if len(w.pending) >= queueSize {
-		return fmt.Errorf("queue is full: %d", len(w.pending))
+		return 0, fmt.Errorf("queue is full: %d", len(w.pending))
 	}
-
 	w.pending = append(w.pending, op)
-	if err := w.appendEnqueueLocked(op); err != nil {
-		return err
-	}
+	w.seq++
 	w.signal()
-	return nil
+	if err := w.appendLocked(rec); err != nil {
+		return 0, err
+	}
+	return w.seq, nil
 }
 
 func (w *workerState) signal() {
@@ -352,13 +448,55 @@ func (w *workerState) ack() error {
 		return nil
 	}
 	w.pending = w.pending[1:]
-	if err := w.appendAckLocked(); err != nil {
+	// An ack is never fsynced on its own. If a crash loses it, the op and
+	// the ones after it are sent again in order, and the peer ends the same.
+	return w.appendLocked([]byte("A\n"))
+}
+
+// syncTo returns once the WAL is on disk up to record seq. Callers that
+// arrive during an fsync wait for it and then share the next one.
+func (w *workerState) syncTo(seq uint64) error {
+	if w.synced.Load() >= seq {
+		return nil
+	}
+	w.syncMu.Lock()
+	defer w.syncMu.Unlock()
+	if w.synced.Load() >= seq {
+		return nil
+	}
+
+	w.mu.Lock()
+	f, target := w.walFile, w.seq
+	if w.needCheckpoint || f == nil {
+		err := w.checkpointLocked()
+		w.mu.Unlock()
 		return err
 	}
-	if int64(w.writes) >= atomic.LoadInt64(&walCheckpointEvery) {
+	w.mu.Unlock()
+
+	if err := syncWAL(f); err != nil {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if w.synced.Load() >= seq || w.walFile != f {
+			return nil // a checkpoint has written and fsynced it since
+		}
+		// After a failed fsync the kernel may have dropped the unwritten
+		// pages, and fsyncing again can report success without them.
+		// Write the whole queue to a new file instead.
+		log.Println("failed to fsync sync wal, rewriting it", w.addr, err)
 		return w.checkpointLocked()
 	}
+	w.markSynced(target)
 	return nil
+}
+
+func (w *workerState) markSynced(seq uint64) {
+	for {
+		cur := w.synced.Load()
+		if cur >= seq || w.synced.CompareAndSwap(cur, seq) {
+			return
+		}
+	}
 }
 
 func (w *workerState) ensureWALFileLocked() error {
@@ -376,76 +514,63 @@ func (w *workerState) ensureWALFileLocked() error {
 	return nil
 }
 
-func (w *workerState) appendEnqueueLocked(op syncOp) error {
+// appendLocked writes one record. A failed write can leave a partial record
+// at the end of the file, which loadWAL skips; nothing is appended after it,
+// since the next call rewrites the file from pending instead.
+func (w *workerState) appendLocked(rec []byte) error {
+	if w.needCheckpoint {
+		return w.checkpointLocked()
+	}
 	if err := w.ensureWALFileLocked(); err != nil {
+		w.needCheckpoint = true
 		return err
 	}
-	b, err := json.Marshal(op)
-	if err != nil {
-		return err
-	}
-	if _, err := w.walFile.Write([]byte("E ")); err != nil {
-		return err
-	}
-	if _, err := w.walFile.Write(b); err != nil {
-		return err
-	}
-	if _, err := w.walFile.Write([]byte{'\n'}); err != nil {
-		return err
-	}
-	if err := w.walFile.Sync(); err != nil {
+	if _, err := writeWAL(w.walFile, rec); err != nil {
+		w.needCheckpoint = true
 		return err
 	}
 	w.writes++
+	if w.reclaimableLocked() {
+		return w.checkpointLocked()
+	}
 	return nil
 }
 
-func (w *workerState) appendAckLocked() error {
-	if err := w.ensureWALFileLocked(); err != nil {
-		return err
-	}
-	if _, err := w.walFile.Write([]byte("A\n")); err != nil {
-		return err
-	}
-	if err := w.walFile.Sync(); err != nil {
-		return err
-	}
-	w.writes++
-	return nil
-}
+// checkpointLocked rewrites the WAL to hold only the pending ops. The new
+// file is fsynced and renamed into place, so everything queued is on disk
+// when it returns nil.
+func (w *workerState) checkpointLocked() (err error) {
+	defer func() { w.needCheckpoint = err != nil }()
 
-func (w *workerState) checkpointLocked() error {
 	if w.walFile != nil {
 		_ = w.walFile.Close()
 		w.walFile = nil
 	}
-	if err := os.MkdirAll(filepath.Dir(w.walPath), 0o755); err != nil {
+	dir := filepath.Dir(w.walPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
+	var buf []byte
+	for _, op := range w.pending {
+		b, err := json.Marshal(op)
+		if err != nil {
+			return err
+		}
+		buf = append(append(append(buf, "E "...), b...), '\n')
+	}
 	tmp := w.walPath + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	for _, op := range w.pending {
-		b, err := json.Marshal(op)
-		if err != nil {
-			_ = f.Close()
-			return err
-		}
-		if _, err := f.Write([]byte("E ")); err != nil {
-			_ = f.Close()
-			return err
-		}
-		if _, err := f.Write(b); err != nil {
-			_ = f.Close()
-			return err
-		}
-		if _, err := f.Write([]byte{'\n'}); err != nil {
-			_ = f.Close()
-			return err
-		}
+	if _, err := writeWAL(f, buf); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := syncWAL(f); err != nil {
+		_ = f.Close()
+		return err
 	}
 	if err := f.Close(); err != nil {
 		return err
@@ -453,8 +578,28 @@ func (w *workerState) checkpointLocked() error {
 	if err := os.Rename(tmp, w.walPath); err != nil {
 		return err
 	}
+	if err := syncDir(dir); err != nil {
+		return err
+	}
 	w.writes = len(w.pending)
+	w.markSynced(w.seq)
 	return w.ensureWALFileLocked()
+}
+
+// reclaimableLocked reports whether a checkpoint would drop enough records:
+// the acks and the ops they acked. The queue itself does not count, so a
+// peer that is down does not make every write rewrite the file.
+func (w *workerState) reclaimableLocked() bool {
+	return int64(w.writes-len(w.pending)) >= atomic.LoadInt64(&walCheckpointEvery)
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 func doRequest(op syncOp, addr string) (string, error) {

@@ -280,7 +280,7 @@ func TestEnqueueQueueFull(t *testing.T) {
 	resetSyncState(t)
 	w := newTestWorker(t, "http://full")
 	w.pending = make([]syncOp, queueSize)
-	if err := w.enqueue(syncOp{Method: http.MethodPost, Path: "/vacuum"}); err == nil {
+	if _, err := w.enqueue(syncOp{Method: http.MethodPost, Path: "/vacuum"}); err == nil {
 		t.Fatal("enqueue on a full queue should fail")
 	}
 }

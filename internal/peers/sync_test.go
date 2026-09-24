@@ -140,7 +140,7 @@ func resetSyncState(t *testing.T) {
 
 func TestWALAppendAndCheckpoint(t *testing.T) {
 	resetSyncState(t)
-	atomic.StoreInt64(&walCheckpointEvery, 3)
+	atomic.StoreInt64(&walCheckpointEvery, 2)
 
 	addr := "http://example-peer"
 	w := &workerState{
@@ -152,10 +152,10 @@ func TestWALAppendAndCheckpoint(t *testing.T) {
 		t.Fatalf("loadWAL failed: %v", err)
 	}
 
-	if err := w.enqueue(syncOp{Method: http.MethodPut, Path: "/db/a", Body: []byte("1")}); err != nil {
+	if _, err := w.enqueue(syncOp{Method: http.MethodPut, Path: "/db/a", Body: []byte("1")}); err != nil {
 		t.Fatalf("enqueue #1 failed: %v", err)
 	}
-	if err := w.enqueue(syncOp{Method: http.MethodDelete, Path: "/db/b"}); err != nil {
+	if _, err := w.enqueue(syncOp{Method: http.MethodDelete, Path: "/db/b"}); err != nil {
 		t.Fatalf("enqueue #2 failed: %v", err)
 	}
 
