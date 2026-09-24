@@ -33,6 +33,16 @@ type fileStore struct {
 
 	walFile *os.File
 	walOps  int
+
+	// With lazySync set (raft.fsync: everysec), log appends return before
+	// they are fsynced and a background loop fsyncs them within a second.
+	// Term, vote, checkpoints and WAL truncation are always fsynced.
+	lazySync   bool
+	dirty      bool // the WAL holds writes that are not fsynced yet
+	syncFailed bool // the background fsync has failed and said so
+	syncs      int  // WAL fsyncs, for tests
+	stopSync   chan struct{}
+	syncDone   chan struct{}
 }
 
 type persistedState struct {
@@ -236,7 +246,9 @@ func (s *fileStore) applyWALRecordLocked(rec walRecord) error {
 	return nil
 }
 
-func (s *fileStore) appendWALLocked(rec walRecord) error {
+// appendWALLocked appends rec. A durable record is fsynced before this
+// returns; a log append may be left to the background loop under lazySync.
+func (s *fileStore) appendWALLocked(rec walRecord, durable bool) error {
 	if s.walFile == nil {
 		if err := os.MkdirAll(filepath.Dir(s.walPath), 0o755); err != nil {
 			return err
@@ -259,10 +271,16 @@ func (s *fileStore) appendWALLocked(rec walRecord) error {
 	if _, err := s.walFile.Write(append(b, '\n')); err != nil {
 		return err
 	}
-	// Raft treats a stored log entry, term or vote as durable once this
-	// returns: a node that forgets its vote can vote twice in one term.
-	if err := s.walFile.Sync(); err != nil {
-		return err
+	// Raft treats a stored term or vote as durable once this returns: a
+	// node that forgets its vote can vote twice in one term. Log entries
+	// get the same treatment unless raft.fsync is everysec. The WAL is one
+	// file, so this also covers any log entries still waiting for the loop.
+	if durable || !s.lazySync {
+		if err := s.syncWALLocked(); err != nil {
+			return err
+		}
+	} else {
+		s.dirty = true
 	}
 	s.walOps++
 	if s.walOps >= storeCheckpointEvery {
@@ -289,8 +307,87 @@ func (s *fileStore) compactLocked() error {
 	if err := syncDir(s.dir); err != nil {
 		return err
 	}
+	// Everything the old WAL held is in the fsynced checkpoint.
+	s.dirty = false
 	s.walOps = 0
 	return nil
+}
+
+func (s *fileStore) syncWALLocked() error {
+	if err := s.walFile.Sync(); err != nil {
+		return err
+	}
+	s.syncs++
+	s.dirty = false
+	return nil
+}
+
+// syncEvery switches log appends to lazy fsync and starts the loop that
+// fsyncs them every d.
+func (s *fileStore) syncEvery(d time.Duration) {
+	s.mu.Lock()
+	s.lazySync = true
+	s.stopSync = make(chan struct{})
+	s.syncDone = make(chan struct{})
+	stop, done := s.stopSync, s.syncDone
+	s.mu.Unlock()
+
+	go func() {
+		defer close(done)
+		t := time.NewTicker(d)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				s.syncIfDirty()
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+func (s *fileStore) syncIfDirty() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.dirty || s.walFile == nil {
+		return
+	}
+	if err := s.syncWALLocked(); err != nil {
+		if !s.syncFailed {
+			s.syncFailed = true
+			log.Printf("raft wal: background fsync failed, will keep trying: %v", err)
+		}
+		return
+	}
+	s.syncFailed = false
+}
+
+// Close stops the background loop, fsyncs what it had not, and closes the WAL.
+func (s *fileStore) Close() error {
+	s.mu.Lock()
+	stop, done := s.stopSync, s.syncDone
+	s.stopSync = nil
+	s.mu.Unlock()
+	if stop != nil {
+		close(stop)
+		<-done
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.walFile == nil {
+		return nil
+	}
+	var err error
+	if s.dirty {
+		err = s.syncWALLocked()
+	}
+	if cerr := s.walFile.Close(); err == nil {
+		err = cerr
+	}
+	s.walFile = nil
+	return err
 }
 
 func (s *fileStore) persistSnapshotLocked() error {
@@ -432,7 +529,7 @@ func (s *fileStore) StoreLogs(logsIn []*raft.Log) error {
 	return s.appendWALLocked(walRecord{
 		Type: "store_logs",
 		Logs: persisted,
-	})
+	}, false)
 }
 
 func (s *fileStore) DeleteRange(min, max uint64) error {
@@ -450,7 +547,7 @@ func (s *fileStore) DeleteRange(min, max uint64) error {
 		Type: "delete_range",
 		Min:  min,
 		Max:  max,
-	})
+	}, false)
 }
 
 func (s *fileStore) Set(key []byte, val []byte) error {
@@ -463,7 +560,7 @@ func (s *fileStore) Set(key []byte, val []byte) error {
 		Type: "set",
 		Key:  k,
 		Val:  cp,
-	})
+	}, true)
 }
 
 func (s *fileStore) Get(key []byte) ([]byte, error) {
@@ -485,7 +582,7 @@ func (s *fileStore) SetUint64(key []byte, val uint64) error {
 		Type:      "set_u64",
 		Key:       k,
 		ValUint64: val,
-	})
+	}, true)
 }
 
 func (s *fileStore) GetUint64(key []byte) (uint64, error) {

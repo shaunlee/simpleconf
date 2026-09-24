@@ -44,6 +44,20 @@ type Config struct {
 	Dir       string
 	Bootstrap bool
 	Peers     []Peer
+	// Fsync is when Raft log entries are fsynced: "always" (the default,
+	// also for "") or "everysec". Term and vote are fsynced either way.
+	Fsync string
+}
+
+// parseFsync reports whether log entries may be fsynced lazily.
+func parseFsync(v string) (everysec bool, err error) {
+	switch v {
+	case "", "always":
+		return false, nil
+	case "everysec":
+		return true, nil
+	}
+	return false, fmt.Errorf("unknown raft.fsync %q (want always or everysec)", v)
 }
 
 type command struct {
@@ -71,6 +85,7 @@ type Manager struct {
 
 	mu         sync.RWMutex
 	raft       *raft.Raft
+	store      *fileStore
 	raftAddr   string
 	httpAddr   string
 	raftToHTTP map[string]string
@@ -111,6 +126,10 @@ func Start(cfg Config) (*Manager, error) {
 	if len(cfg.NodeID) == 0 || len(cfg.RaftAddr) == 0 || len(cfg.Dir) == 0 {
 		return nil, fmt.Errorf("raft enabled but missing required config: node_id/raft_addr/dir")
 	}
+	lazySync, err := parseFsync(cfg.Fsync)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
 		return nil, err
@@ -140,7 +159,11 @@ func Start(cfg Config) (*Manager, error) {
 
 	r, err := raft.NewRaft(raftCfg, &fsm{}, store, store, snapshots, transport)
 	if err != nil {
+		_ = store.Close()
 		return nil, err
+	}
+	if lazySync {
+		store.syncEvery(time.Second)
 	}
 
 	if cfg.Bootstrap && len(cfg.Peers) > 0 {
@@ -152,6 +175,8 @@ func Start(cfg Config) (*Manager, error) {
 			})
 		}
 		if f := r.BootstrapCluster(raft.Configuration{Servers: servers}); f.Error() != nil && f.Error() != raft.ErrCantBootstrap {
+			_ = r.Shutdown().Error()
+			_ = store.Close()
 			return nil, f.Error()
 		}
 	}
@@ -167,10 +192,15 @@ func Start(cfg Config) (*Manager, error) {
 	}
 
 	m.raft = r
+	m.store = store
 	m.raftAddr = cfg.RaftAddr
 	m.httpAddr = normalizeHTTPAddr(cfg.HTTPAddr)
 	m.raftToHTTP = raftToHTTP
-	log.Println("raft enabled on", cfg.RaftAddr, "node", cfg.NodeID, "forward", cfg.Forward)
+	fsync := "always"
+	if lazySync {
+		fsync = "everysec"
+	}
+	log.Println("raft enabled on", cfg.RaftAddr, "node", cfg.NodeID, "forward", cfg.Forward, "fsync", fsync)
 	return m, nil
 }
 
@@ -179,6 +209,9 @@ func (m *Manager) Shutdown() {
 		return
 	}
 	_ = m.raft.Shutdown().Error()
+	if err := m.store.Close(); err != nil {
+		log.Printf("raft wal: close: %v", err)
+	}
 }
 
 func (m *Manager) ApplySet(key string, value any) error {

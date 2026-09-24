@@ -49,3 +49,12 @@ func TestRaftPeers(t *testing.T) {
 		t.Fatalf("got %+v", c.Raft.Peers)
 	}
 }
+
+func TestRaftFsync(t *testing.T) {
+	if c := load(t, ""); c.Raft.Fsync != "" {
+		t.Fatalf("default raft.fsync = %q, want empty (always)", c.Raft.Fsync)
+	}
+	if c := load(t, "raft:\n  fsync: everysec\n"); c.Raft.Fsync != "everysec" {
+		t.Fatalf("raft.fsync = %q", c.Raft.Fsync)
+	}
+}

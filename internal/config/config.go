@@ -52,6 +52,7 @@ func Load() (*Config, error) {
 			HTTPAddr:  v.GetString("raft.http_addr"),
 			Bootstrap: v.GetBool("raft.bootstrap"),
 			Peers:     parseRaftPeers(v.GetStringSlice("raft.peers")),
+			Fsync:     v.GetString("raft.fsync"),
 		},
 		PeerAddrs:  v.GetStringSlice("peers.addresses"),
 		PeerListen: first(v.GetString("peers.listen"), v.GetString("peers_listen")),

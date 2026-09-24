@@ -14,7 +14,7 @@ import (
 // benchLeader starts a single-node cluster and makes it the default manager.
 // As in main, the AOF is off under Raft; benchmarks run after the tests, so
 // turning it off for the rest of the process does not affect them.
-func benchLeader(b *testing.B) {
+func benchLeader(b *testing.B, fsync string) {
 	b.Helper()
 	log.SetOutput(io.Discard)
 	b.Cleanup(func() { log.SetOutput(os.Stderr) })
@@ -30,6 +30,7 @@ func benchLeader(b *testing.B) {
 		Dir:       b.TempDir(),
 		Bootstrap: true,
 		Peers:     []Peer{{ID: "n1", RaftAddr: addr}},
+		Fsync:     fsync,
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -42,8 +43,15 @@ func benchLeader(b *testing.B) {
 }
 
 // Every write is one Raft log entry, stored before it is applied.
-func BenchmarkRaftApply(b *testing.B) {
-	benchLeader(b)
+func BenchmarkRaftApply(b *testing.B)         { benchApply(b, "always") }
+func BenchmarkRaftApplyEverysec(b *testing.B) { benchApply(b, "everysec") }
+
+// Concurrent writers let Raft store several entries per log write.
+func BenchmarkRaftApplyParallel(b *testing.B)         { benchApplyParallel(b, "always") }
+func BenchmarkRaftApplyEverysecParallel(b *testing.B) { benchApplyParallel(b, "everysec") }
+
+func benchApply(b *testing.B, fsync string) {
+	benchLeader(b, fsync)
 	raw := []byte(`"v"`)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -53,9 +61,8 @@ func BenchmarkRaftApply(b *testing.B) {
 	}
 }
 
-// Concurrent writers let Raft store several entries per log write.
-func BenchmarkRaftApplyParallel(b *testing.B) {
-	benchLeader(b)
+func benchApplyParallel(b *testing.B, fsync string) {
+	benchLeader(b, fsync)
 	raw := []byte(`"v"`)
 	var n atomic.Int64
 	b.ResetTimer()

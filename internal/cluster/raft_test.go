@@ -143,3 +143,37 @@ func TestNoLeader(t *testing.T) {
 		t.Fatalf("got %+v, %v; want NotLeaderError without a leader", nl, ok)
 	}
 }
+
+func TestSingleNodeRaftEverysec(t *testing.T) {
+	useDB(t)
+	dir := t.TempDir()
+	start := func() *Manager {
+		addr := freeAddr(t)
+		m, err := Start(Config{Enabled: true, NodeID: "n1", RaftAddr: addr, Dir: dir, Bootstrap: true,
+			Peers: []Peer{{ID: "n1", RaftAddr: addr}}, Fsync: "everysec"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitLeader(t, m)
+		return m
+	}
+
+	m := start()
+	useDefault(t, m)
+	if err := ApplySetRaw("k", []byte(`"v"`)); err != nil {
+		t.Fatal(err)
+	}
+	m.Shutdown() // fsyncs what the background loop had not
+
+	db.Close()
+	db.Init(t.TempDir()) // an empty document; Raft replays into it
+	m = start()
+	defer m.Shutdown()
+	deadline := time.Now().Add(5 * time.Second)
+	for db.Get("k") != `"v"` {
+		if time.Now().After(deadline) {
+			t.Fatalf("write not replayed after restart: %s", db.Get(""))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
