@@ -1,0 +1,23 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        # Closing on cleanup: there is nothing useful to do with the error.
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net.Conn).Close
+        - (*net.TCPListener).Close
+        - os.Remove
+        # bufio.Writer keeps its first error and returns it from every later
+        # call, so the callers check the last write or the Flush instead.
+        - (*bufio.Writer).Write
+        - (*bufio.Writer).WriteByte
+        - (*bufio.Writer).WriteString
+        - (*bufio.Writer).Flush
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
