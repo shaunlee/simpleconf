@@ -238,6 +238,7 @@ raft:
   listen: 10.0.0.1:7001               # an address the other nodes can reach, not 0.0.0.0
   http_addr: http://10.0.0.1:23456    # where other nodes send forwarded writes
   bootstrap: true
+  fsync: always                       # or everysec; see below
   peers:
     - node-1,10.0.0.1:7001,http://10.0.0.1:23456
     - node-2,10.0.0.2:7001,http://10.0.0.2:23456
@@ -251,10 +252,21 @@ receives them, so a follower can briefly return a value the leader has already
 replaced.
 
 With Raft enabled the append-only file is not used, and `db.fsync` does not
-apply: the Raft log and its snapshots, under `db.dir/raft`, hold the data. A
-write is acknowledged once a majority of nodes have fsynced it to their log.
-Concurrent writes share an fsync, so a single client writing one key at a time
-sees the full cost of the disk; see the Raft figures in
+apply: the Raft log and its snapshots, under `db.dir/raft`, hold the data.
+`raft.fsync` decides when a node's log entries reach its disk:
+
+| `raft.fsync` | A write is acknowledged once | It can still be lost if |
+| --- | --- | --- |
+| `always` (default) | a majority of nodes have fsynced it | a majority of the disks fail |
+| `everysec` | a majority of nodes have it; each fsyncs within a second | a majority lose power in the same second, or a follower that had it loses power and the leader fails before the write reaches another node |
+
+Under both settings a node fsyncs its term and vote every time they change:
+a node that forgot its vote could vote twice in one term and let two leaders
+be elected. Choose `everysec` only when the nodes do not share a power supply.
+
+Concurrent writes share an fsync, so under `always` a single client writing
+one key at a time sees the full cost of the disk. On one test machine a single
+writer took 590 µs per write under `always` and 40 µs under `everysec`; see
 [docs/benchmarks.md](docs/benchmarks.md#raft).
 
 ## Peers mode
