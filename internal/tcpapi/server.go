@@ -78,130 +78,69 @@ func (p *Server) handle(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
-outer:
 	for !p.exit.Load() {
-		if l, err := readlineFlush(reader, writer); err != nil {
+		l, err := readlineFlush(reader, writer)
+		if err != nil {
 			break
-		} else if len(l) == 0 {
+		}
+		if len(l) == 0 {
 			continue
-		} else {
-			switch l[0] {
-			case '=':
-				k := string(l[1:])
-				val := db.Get(k)
-				if err := writeBulk(writer, val); err != nil {
-					break outer
-				}
-			case '+':
-				if len(l) == 1 {
-					if err := writelines(writer, "-ERR the key path is required\n"); err != nil {
-						break outer
-					}
-				} else if nl, err := readlineFlush(reader, writer); err != nil {
-					break outer
-				} else {
-					k := string(l[1:])
-					if err := cluster.ApplySetRaw(k, nl); err != nil {
-						if nl, ok := cluster.AsNotLeader(err); ok {
-							if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nl.LeaderHTTPAddr)); err != nil {
-								break outer
-							}
-							continue
-						}
-						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-							break outer
-						}
-					} else {
-						if err := writelines(writer, "+OK\n"); err != nil {
-							break outer
-						}
-					}
-				}
-			case '-':
-				if len(l) == 1 {
-					if err := writelines(writer, "-ERR the key path is required\n"); err != nil {
-						break outer
-					}
-				} else {
-					k := string(l[1:])
-					if err := cluster.ApplyDelete(k); err != nil {
-						if nl, ok := cluster.AsNotLeader(err); ok {
-							if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nl.LeaderHTTPAddr)); err != nil {
-								break outer
-							}
-							continue
-						}
-						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-							break outer
-						}
-						continue
-					}
-					if err := writelines(writer, "+OK\n"); err != nil {
-						break outer
-					}
-				}
-			case '<':
-				if len(l) == 1 {
-					if err := writelines(writer, "-ERR the source key path is required\n"); err != nil {
-						break outer
-					}
-				} else if nl, err := readlineFlush(reader, writer); err != nil {
-					break outer
-				} else if len(nl) <= 1 || nl[0] != '>' {
-					if err := writelines(writer, "-ERR the target key path is required\n"); err != nil {
-						break outer
-					}
-				} else {
-					fk := string(l[1:])
-					tk := string(nl[1:])
-					if err := cluster.ApplyClone(fk, tk); err != nil {
-						if nlErr, ok := cluster.AsNotLeader(err); ok {
-							if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nlErr.LeaderHTTPAddr)); err != nil {
-								break outer
-							}
-							continue
-						}
-						if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-							break outer
-						}
-						continue
-					}
-					if err := writelines(writer, "+OK\n"); err != nil {
-						break outer
-					}
-				}
-			case '*':
-				if err := cluster.ApplyVacuum(); err != nil {
-					if nl, ok := cluster.AsNotLeader(err); ok {
-						if err := writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nl.LeaderHTTPAddr)); err != nil {
-							break outer
-						}
-						continue
-					}
-					if err := writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error())); err != nil {
-						break outer
-					}
-					continue
-				}
-				if err := writelines(writer, "+OK\n"); err != nil {
-					break outer
-				}
-			case 'p', 'P':
-				if bytes.EqualFold(l, []byte("PING")) {
-					if err := writelines(writer, "+PONG\n"); err != nil {
-						break outer
-					}
-					continue
-				}
-				fallthrough
-			default:
-				if err := writelines(writer, "-ERR unknown command\n"); err != nil {
-					break outer
-				}
+		}
+		switch l[0] {
+		case '=':
+			err = writeBulk(writer, db.Get(string(l[1:])))
+		case '+':
+			if len(l) == 1 {
+				err = writelines(writer, "-ERR the key path is required\n")
+			} else if nl, rerr := readlineFlush(reader, writer); rerr != nil {
+				err = rerr
+			} else {
+				err = writeResult(writer, cluster.ApplySetRaw(string(l[1:]), nl))
 			}
+		case '-':
+			if len(l) == 1 {
+				err = writelines(writer, "-ERR the key path is required\n")
+			} else {
+				err = writeResult(writer, cluster.ApplyDelete(string(l[1:])))
+			}
+		case '<':
+			if len(l) == 1 {
+				err = writelines(writer, "-ERR the source key path is required\n")
+			} else if nl, rerr := readlineFlush(reader, writer); rerr != nil {
+				err = rerr
+			} else if len(nl) <= 1 || nl[0] != '>' {
+				err = writelines(writer, "-ERR the target key path is required\n")
+			} else {
+				err = writeResult(writer, cluster.ApplyClone(string(l[1:]), string(nl[1:])))
+			}
+		case '*':
+			err = writeResult(writer, cluster.ApplyVacuum())
+		case 'p', 'P':
+			if bytes.EqualFold(l, []byte("PING")) {
+				err = writelines(writer, "+PONG\n")
+				break
+			}
+			fallthrough
+		default:
+			err = writelines(writer, "-ERR unknown command\n")
+		}
+		if err != nil {
+			break
 		}
 	}
 	writer.Flush()
+}
+
+// writeResult replies to a write command: +OK on success, the leader's
+// address when this node is a follower, or the error otherwise.
+func writeResult(writer *bufio.Writer, err error) error {
+	if err == nil {
+		return writelines(writer, "+OK\n")
+	}
+	if nl, ok := cluster.AsNotLeader(err); ok {
+		return writelines(writer, fmt.Sprintf("-ERR not leader %s\n", nl.LeaderHTTPAddr))
+	}
+	return writelines(writer, fmt.Sprintf("-ERR %s\n", err.Error()))
 }
 
 // readlineFlush flushes pending output before a read that would have to wait
