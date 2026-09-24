@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"github.com/hashicorp/raft"
 	"os"
 	"path/filepath"
@@ -114,8 +115,8 @@ func TestFileStoreLoadErrors(t *testing.T) {
 		"unreadable snapshot": func(dir string) error {
 			return os.Mkdir(filepath.Join(dir, "raft-state.snapshot.json"), 0o755)
 		},
-		"corrupt wal": func(dir string) error {
-			return os.WriteFile(filepath.Join(dir, "raft-state.wal"), []byte("{\n"), 0o600)
+		"corrupt wal record before the last": func(dir string) error {
+			return os.WriteFile(filepath.Join(dir, "raft-state.wal"), []byte("{\n"+`{"type":"set","key":"k"}`+"\n"), 0o600)
 		},
 		"unknown wal record": func(dir string) error {
 			return os.WriteFile(filepath.Join(dir, "raft-state.wal"), []byte(`{"type":"bogus"}`+"\n"), 0o600)
@@ -146,5 +147,77 @@ func TestFileStoreEmptySnapshot(t *testing.T) {
 	}
 	if n, err := s.LastIndex(); err != nil || n != 0 {
 		t.Fatalf("LastIndex = %d, %v", n, err)
+	}
+}
+
+// One WAL line holds a whole batch, so it can be far longer than
+// bufio.Scanner's 64 KB default.
+func TestFileStoreLargeRecord(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte("x"), 1<<20)
+	if err := s.StoreLog(&raft.Log{Index: 1, Term: 1, Type: raft.LogCommand, Data: big}); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := newFileStore(dir)
+	if err != nil {
+		t.Fatalf("reopen after a 1 MB entry: %v", err)
+	}
+	var got raft.Log
+	if err := s2.GetLog(1, &got); err != nil || !bytes.Equal(got.Data, big) {
+		t.Fatalf("GetLog = %d bytes, %v", len(got.Data), err)
+	}
+}
+
+// A crash in the middle of an append leaves a partial last line. It was never
+// acknowledged, so the store drops it and carries on.
+func TestFileStoreTornTail(t *testing.T) {
+	for name, tail := range map[string]string{
+		"no newline":      `{"type":"store_logs","logs":[{"index":2,"te`,
+		"unparsable line": "{\"type\":\"store_lo\n",
+	} {
+		dir := t.TempDir()
+		s, err := newFileStore(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.StoreLog(&raft.Log{Index: 1, Term: 1, Type: raft.LogCommand, Data: []byte("a")}); err != nil {
+			t.Fatal(err)
+		}
+		whole, err := os.ReadFile(s.walPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.OpenFile(s.walPath, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString(tail)
+		f.Close()
+
+		s2, err := newFileStore(dir)
+		if err != nil {
+			t.Fatalf("%s: reopen with a torn tail: %v", name, err)
+		}
+		if n, _ := s2.LastIndex(); n != 1 {
+			t.Fatalf("%s: LastIndex = %d want 1", name, n)
+		}
+		if after, _ := os.ReadFile(s2.walPath); !bytes.Equal(after, whole) {
+			t.Fatalf("%s: WAL not cut back to its last whole record:\n%q\nwant\n%q", name, after, whole)
+		}
+		// Appends continue on a clean line.
+		if err := s2.StoreLog(&raft.Log{Index: 2, Term: 1, Type: raft.LogCommand, Data: []byte("b")}); err != nil {
+			t.Fatal(err)
+		}
+		s3, err := newFileStore(dir)
+		if err != nil {
+			t.Fatalf("%s: reopen after appending: %v", name, err)
+		}
+		if n, _ := s3.LastIndex(); n != 2 {
+			t.Fatalf("%s: LastIndex after append = %d want 2", name, n)
+		}
 	}
 }

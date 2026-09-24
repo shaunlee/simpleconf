@@ -2,10 +2,13 @@ package cluster
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/hashicorp/raft"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -141,6 +144,11 @@ func (s *fileStore) loadSnapshotLocked() error {
 	return nil
 }
 
+// replayWALLocked applies the WAL on top of the checkpoint. Records are read
+// with no length limit: one line holds a whole batch of log entries. A last
+// record cut short, by a crash in the middle of a write, is dropped and the
+// file truncated after the last whole record; it was never acknowledged. A bad
+// record anywhere else means the file is damaged, and is an error.
 func (s *fileStore) replayWALLocked() error {
 	f, err := os.Open(s.walPath)
 	if err != nil {
@@ -151,22 +159,50 @@ func (s *fileStore) replayWALLocked() error {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
+	reader := bufio.NewReaderSize(f, 64*1024)
+	var good int64 // offset just past the last whole record
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err == io.EOF {
+			if len(line) > 0 {
+				return s.dropTornTailLocked(good, len(line))
+			}
+			return nil
 		}
-		var rec walRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
+		if err != nil {
 			return err
 		}
-		if err := s.applyWALRecordLocked(rec); err != nil {
-			return err
+		body := bytes.TrimSpace(line)
+		if len(body) > 0 {
+			var rec walRecord
+			if err := json.Unmarshal(body, &rec); err != nil {
+				if _, perr := reader.Peek(1); perr == io.EOF {
+					return s.dropTornTailLocked(good, len(line))
+				}
+				return fmt.Errorf("raft wal: bad record at byte %d: %w", good, err)
+			}
+			if err := s.applyWALRecordLocked(rec); err != nil {
+				return err
+			}
+			s.walOps++
 		}
-		s.walOps++
+		good += int64(len(line))
 	}
-	return scanner.Err()
+}
+
+// dropTornTailLocked cuts the WAL back to size bytes, removing a last record
+// that was only partly written.
+func (s *fileStore) dropTornTailLocked(size int64, torn int) error {
+	log.Printf("raft wal: dropping an incomplete last record (%d bytes)", torn)
+	f, err := os.OpenFile(s.walPath, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Truncate(size); err != nil {
+		return err
+	}
+	return f.Sync()
 }
 
 func (s *fileStore) applyWALRecordLocked(rec walRecord) error {
