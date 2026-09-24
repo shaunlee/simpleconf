@@ -506,6 +506,9 @@ func Init(dir string) {
 	dbfn = filepath.Join(dir, "data.aof")
 
 	if aofEnabled {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Fatalf("failed to create db dir: %v", err)
+		}
 		if err := reopen(); err != nil {
 			log.Fatalf("failed to open db: %v", err)
 		}

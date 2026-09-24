@@ -179,3 +179,16 @@ func TestVacuumTwiceInOneSecond(t *testing.T) {
 		t.Fatalf("temp file left behind: %v", err)
 	}
 }
+
+func TestInitCreatesDir(t *testing.T) {
+	resetConfig()
+	dir := filepath.Join(t.TempDir(), "not", "yet")
+	Init(dir)
+	defer Close()
+	if err := Set("k", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data.aof")); err != nil {
+		t.Fatalf("AOF not created in a new directory: %v", err)
+	}
+}
