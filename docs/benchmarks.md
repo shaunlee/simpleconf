@@ -140,3 +140,20 @@ BenchmarkTcpSetParallel-12      	 1738848	      1353 ns/op	      83 B/op	       
 BenchmarkTcpDelParallel-12      	 1780437	      1341 ns/op	      32 B/op	       4 allocs/op
 BenchmarkTcpCloneParallel-12    	 1747497	      1375 ns/op	      81 B/op	       8 allocs/op
 ```
+
+## Raft
+
+`go test ./internal/cluster/ -bench RaftApply -benchtime 5000x`, a single-node
+cluster, in a Linux container on the same machine. Every write is a Raft log
+entry that is fsynced before it is applied. Raft stores entries in batches, so
+concurrent writers share an fsync:
+
+```text
+writers   per write   writes/s
+1         470 µs      ~2.1k
+12        120 µs      ~8.3k
+64         34 µs      ~29k
+```
+
+On macOS, where Go's `fsync` is `F_FULLFSYNC`, one writer takes about 4 ms per
+write.

@@ -250,8 +250,12 @@ write and names the leader instead. Reads are answered by the node that
 receives them, so a follower can briefly return a value the leader has already
 replaced.
 
-With Raft enabled the append-only file is not used: the Raft log and its
-snapshots, under `db.dir/raft`, hold the data.
+With Raft enabled the append-only file is not used, and `db.fsync` does not
+apply: the Raft log and its snapshots, under `db.dir/raft`, hold the data. A
+write is acknowledged once a majority of nodes have fsynced it to their log.
+Concurrent writes share an fsync, so a single client writing one key at a time
+sees the full cost of the disk; see the Raft figures in
+[docs/benchmarks.md](docs/benchmarks.md#raft).
 
 ## Peers mode
 

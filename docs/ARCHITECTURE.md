@@ -17,5 +17,5 @@
 
 ## Durability
 
-- DB data is persisted by the `internal/db` package append-only file.
-- Raft metadata/log state is persisted by `internal/cluster` (`fileStore`) under `db.dir/raft`.
+- Without Raft, DB data is persisted by the `internal/db` append-only file, fsynced according to `db.fsync`.
+- With Raft, the append-only file is off. The Raft log, term and vote are persisted by `internal/cluster` (`fileStore`) under `db.dir/raft` and fsynced on every write; Raft's own snapshots of the document sit beside them.
