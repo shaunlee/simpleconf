@@ -41,7 +41,6 @@ func TestFootprint(t *testing.T) {
 		runtime.ReadMemStats(&m1)
 		treeBytes := (m1.HeapAlloc - m0.HeapAlloc) / reps
 		runtime.KeepAlive(trees)
-		trees = nil
 
 		// the representation this replaced: one JSON string, plus the
 		// snapshot readers were handed

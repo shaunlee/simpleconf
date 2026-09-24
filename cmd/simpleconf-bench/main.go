@@ -5,19 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
 const host = "127.0.0.1:23466"
-
-var pool = sync.Pool{
-	New: func() any {
-		nc, _ := net.Dial("tcp4", host)
-		return nc
-	},
-}
 
 var (
 	exit         atomic.Bool
@@ -29,12 +23,21 @@ var (
 	totallatency time.Duration
 	statsMu      sync.Mutex
 	jobs         = make(chan struct{})
-	wgr          sync.WaitGroup
+	dialed       sync.WaitGroup // every connection has been attempted
+	wgr          sync.WaitGroup // every worker has returned
 )
 
-func conn() {
+var ops = map[string]func(*bufio.Reader, *bufio.Writer) error{
+	"set":   set,
+	"get":   get,
+	"clone": clone,
+	"del":   del,
+}
+
+func conn(op func(*bufio.Reader, *bufio.Writer) error) {
 	defer wgr.Done()
 	nc, err := net.Dial("tcp4", host)
+	dialed.Done()
 	if err != nil {
 		atomic.AddUint64(&failed, 1)
 		return
@@ -47,12 +50,10 @@ func conn() {
 	for range jobs {
 
 		ts := time.Now()
-
-		//set(r, w)
-		//get(r, w)
-		//clone(r, w)
-		del(r, w)
-
+		if err := op(r, w); err != nil {
+			atomic.AddUint64(&failed, 1)
+			return
+		}
 		atomic.AddUint64(&total, 1)
 
 		n := time.Since(ts)
@@ -125,20 +126,28 @@ func del(r *bufio.Reader, w *bufio.Writer) error {
 func main() {
 	duration := flag.Duration("d", 10*time.Second, "Duration of test")
 	numberOfConnections := flag.Int("c", 120, "Connections to keep open")
+	opName := flag.String("op", "del", "Command to send: set, get, clone or del")
 	flag.Parse()
 
-	for i := 0; i < *numberOfConnections; i++ {
-		wgr.Add(1)
-		go conn()
+	op, ok := ops[*opName]
+	if !ok {
+		fmt.Printf("Unknown -op %q (want set, get, clone or del)\n", *opName)
+		os.Exit(2)
 	}
-	wgr.Wait()
+
+	dialed.Add(*numberOfConnections)
+	wgr.Add(*numberOfConnections)
+	for i := 0; i < *numberOfConnections; i++ {
+		go conn(op)
+	}
+	dialed.Wait()
 	connectedNow := atomic.LoadUint64(&connected)
 	if connectedNow == 0 {
 		fmt.Printf("Cannot connect to %s (failed: %d). Start server first.\n", host, atomic.LoadUint64(&failed))
 		return
 	}
 
-	fmt.Printf("Running %v test @ %s\n", duration, host)
+	fmt.Printf("Running %v %s test @ %s\n", duration, *opName, host)
 	fmt.Printf("  %d connections\n", connectedNow)
 
 	startAt := time.Now()
@@ -152,6 +161,7 @@ func main() {
 	<-time.After(*duration)
 	exit.Store(true)
 	spent := time.Since(startAt)
+	wgr.Wait()
 	totalReq := atomic.LoadUint64(&total)
 
 	statsMu.Lock()

@@ -55,8 +55,9 @@ func (p *Server) Listen(addr string) error {
 			}
 			return err
 		}
-		conn.SetKeepAlive(true)
-		conn.SetKeepAlivePeriod(10 * time.Second)
+		// Keepalive only speeds up noticing a dead peer; serve without it.
+		_ = conn.SetKeepAlive(true)
+		_ = conn.SetKeepAlivePeriod(10 * time.Second)
 		p.wg.Add(1)
 		go p.handle(conn)
 	}

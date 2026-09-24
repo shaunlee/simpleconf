@@ -61,7 +61,11 @@ func main() {
 			log.Panic(err)
 		}
 	}()
-	defer app.Shutdown()
+	defer func() {
+		if err := app.Shutdown(); err != nil {
+			log.Printf("http shutdown: %v", err)
+		}
+	}()
 
 	tcpApp := tcpapi.New()
 	if len(cfg.TCPListen) > 0 {

@@ -567,7 +567,9 @@ func stopPersist() {
 
 func reopen() error {
 	if db != nil {
-		db.Sync()
+		if err := db.Sync(); err != nil {
+			log.Printf("failed to fsync db: %v", err)
+		}
 		db.Close()
 		db = nil
 	}
@@ -661,7 +663,9 @@ func Close(exit ...bool) {
 	stopPersist()
 
 	if db != nil {
-		db.Sync()
+		if err := db.Sync(); err != nil {
+			log.Printf("failed to fsync db: %v", err)
+		}
 		db.Close()
 		db = nil
 	}
@@ -678,10 +682,17 @@ func persist() {
 	// written since the last fsync.
 	var waiters []chan struct{}
 	unsynced := false
+	// A bufio.Writer keeps its first write error, so once a write fails every
+	// later record is dropped until a vacuum replaces w. Say so once.
+	writeFailed := false
 
 	flush := func() {
-		if w != nil {
-			w.Flush()
+		if w == nil {
+			return
+		}
+		if err := w.Flush(); err != nil && !writeFailed {
+			writeFailed = true
+			log.Printf("failed to write aof, records are dropped until the next vacuum: %v", err)
 		}
 	}
 	syncNow := func() {
@@ -707,12 +718,13 @@ func persist() {
 		switch row.command {
 		case setRawCmd:
 			if w != nil {
-				fmt.Fprintf(w, "+%s\n%s\n", row.key, row.value)
+				// A write error sticks in w and is reported by flush.
+				_, _ = fmt.Fprintf(w, "+%s\n%s\n", row.key, row.value)
 				unsynced = true
 			}
 		case delCmd:
 			if w != nil {
-				fmt.Fprintf(w, "-%s\n", row.key)
+				_, _ = fmt.Fprintf(w, "-%s\n", row.key)
 				unsynced = true
 			}
 		case dumpCmd:
@@ -723,6 +735,7 @@ func persist() {
 			} else {
 				w = nil
 			}
+			writeFailed = false
 			unsynced = false
 		case closeCmd:
 			syncNow()
