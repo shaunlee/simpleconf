@@ -1,5 +1,9 @@
 # simpleconf
 
+[![test](https://github.com/shaunlee/simpleconf/actions/workflows/test.yml/badge.svg)](https://github.com/shaunlee/simpleconf/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/shaunlee/simpleconf/graph/badge.svg)](https://codecov.io/gh/shaunlee/simpleconf)
+[![Go Report Card](https://goreportcard.com/badge/github.com/shaunlee/simpleconf)](https://goreportcard.com/report/github.com/shaunlee/simpleconf)
+
 `simpleconf` is a lightweight configuration service that can be operated over HTTP/TCP, with support for:
 
 - JSON key-path read/write (for example `product.name`)
