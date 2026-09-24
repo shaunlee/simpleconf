@@ -103,6 +103,30 @@ func TestRestore(t *testing.T) {
 	}
 }
 
+// A node that has data keeps it: the peer it would copy from may be a new,
+// empty node, or lack writes still queued here.
+func TestRestoreKeepsExistingData(t *testing.T) {
+	resetSyncState(t)
+	useDB(t)
+	if err := db.SetRaw("mine", []byte("1")); err != nil {
+		t.Fatal(err)
+	}
+	var asked atomic.Bool
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked.Store(true)
+		io.WriteString(w, `{}`)
+	}))
+	defer empty.Close()
+
+	Restore([]string{empty.URL})
+	if got := db.Get(""); got != `{"mine":1}` {
+		t.Fatalf("document = %s, want it kept", got)
+	}
+	if asked.Load() {
+		t.Fatal("a node with data should not fetch the peer's document")
+	}
+}
+
 func TestSyncCloneAndVacuum(t *testing.T) {
 	resetSyncState(t)
 	rec := &recorder{}

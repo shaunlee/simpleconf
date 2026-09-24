@@ -427,6 +427,13 @@ func Del(k string) error {
 	return nil
 }
 
+// Empty reports whether the document has no keys.
+func Empty() bool {
+	configMu.RLock()
+	defer configMu.RUnlock()
+	return len(configRoot.keys) == 0
+}
+
 func Get(k string) string {
 	// A plain key path is answered from the tree without touching the
 	// snapshot, so its cost does not grow with the document.

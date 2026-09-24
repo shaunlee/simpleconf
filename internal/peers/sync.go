@@ -123,9 +123,18 @@ func currentWALDir() string {
 	return walDir
 }
 
+// Restore copies the document from the first peer that answers, but only
+// into a node that has none, such as a new node or one whose data directory
+// was replaced. A node with data keeps it: the peer may be empty itself, or
+// lack writes still queued here, and what the node missed while it was down
+// arrives from the peers' queues.
 func Restore(peerAddrs []string) {
 	Configure(peerAddrs)
 	if len(peerAddrs) == 0 {
+		return
+	}
+	if !db.Empty() {
+		log.Println("keeping the local document; not restoring from peers")
 		return
 	}
 

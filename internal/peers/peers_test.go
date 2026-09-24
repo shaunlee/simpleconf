@@ -14,6 +14,10 @@ func useDB(t *testing.T) {
 	t.Helper()
 	db.Init(t.TempDir())
 	t.Cleanup(func() { db.Close() })
+	// Init loads into the document left by an earlier test.
+	if err := db.Replace("{}"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPeerRoutes(t *testing.T) {

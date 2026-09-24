@@ -153,3 +153,22 @@ func TestCloneToInvalidPath(t *testing.T) {
 		t.Fatalf("clone into an invalid path changed arr: %s", got)
 	}
 }
+
+func TestEmpty(t *testing.T) {
+	useAOF(t)
+	if !Empty() {
+		t.Fatalf("new document %s is not empty", Get(""))
+	}
+	if err := Set("a", 1); err != nil {
+		t.Fatal(err)
+	}
+	if Empty() {
+		t.Fatal("document with a key is empty")
+	}
+	if err := Del("a"); err != nil {
+		t.Fatal(err)
+	}
+	if !Empty() {
+		t.Fatalf("document %s is not empty after deleting its key", Get(""))
+	}
+}

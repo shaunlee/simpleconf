@@ -304,8 +304,13 @@ peers:
     - http://10.0.0.3:23457
 ```
 
-- On start, a node replaces its document with a copy from the first peer that
-  answers.
+- On start, a node with an empty document, such as a new node or one whose
+  data directory was replaced, copies the document from the first peer that
+  answers. A node that already has data keeps it, and gets what it missed
+  while it was down from the other nodes' queues. If a queue was lost, for
+  example in a crash under `db.fsync: everysec`, the nodes stay different:
+  stop the node that is behind, delete its `db.dir`, and start it again to
+  copy the whole document.
 - Each write is queued under `db.dir/peers-wal` before the client gets its
   reply, and sent to every peer in the background, in order. The queue is
   fsynced as `db.fsync` says, like the local data. A peer that cannot be
