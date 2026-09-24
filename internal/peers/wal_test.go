@@ -244,8 +244,10 @@ func TestWALGroupCommit(t *testing.T) {
 }
 
 // A long queue is not a reason to rewrite the WAL: only acked records can be
-// dropped from it.
-func TestNoCheckpointWhileQueueIsLong(t *testing.T) {
+// dropped from it, and a rewrite waits until they are at least as many as
+// the ops still queued, so a peer catching up does not rewrite the queue
+// over and over.
+func TestCheckpointOnlyWhenHalfTheWALIsAcked(t *testing.T) {
 	resetSyncState(t)
 	usePolicy(t, db.FsyncNo)
 	atomic.StoreInt64(&walCheckpointEvery, 4)
@@ -263,16 +265,42 @@ func TestNoCheckpointWhileQueueIsLong(t *testing.T) {
 	if got := syncs.Load(); got != 0 {
 		t.Fatalf("%d checkpoints while nothing was acked, want 0", got)
 	}
-	// Two acks leave four records to drop: two E and two A.
-	for range 2 {
+	// Three acks leave six records to drop and seven ops queued.
+	for range 3 {
 		if err := w.ack(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := syncs.Load(); got != 1 {
-		t.Fatalf("%d checkpoints after two acks, want 1", got)
+	if got := syncs.Load(); got != 0 {
+		t.Fatalf("%d checkpoints after three acks, want 0", got)
 	}
-	if got := walPaths(t, w); len(got) != 8 {
-		t.Fatalf("WAL holds %d ops, want 8", len(got))
+	// The fourth makes it eight and six.
+	if err := w.ack(); err != nil {
+		t.Fatal(err)
+	}
+	if got := syncs.Load(); got != 1 {
+		t.Fatalf("%d checkpoints after four acks, want 1", got)
+	}
+	if got := walPaths(t, w); len(got) != 6 {
+		t.Fatalf("WAL holds %d ops, want 6", len(got))
+	}
+}
+
+// A peer that is down gets every write when it returns, however many.
+func TestQueueHasNoLimit(t *testing.T) {
+	resetSyncState(t)
+	usePolicy(t, db.FsyncNo)
+	w := newTestWorker(t, "http://down")
+	if err := w.loadWAL(); err != nil {
+		t.Fatal(err)
+	}
+	const n = 5000
+	for range n {
+		if _, err := w.enqueue(put("/db/k")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(walPaths(t, w)); got != n {
+		t.Fatalf("WAL holds %d ops, want %d", got, n)
 	}
 }

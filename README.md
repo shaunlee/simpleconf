@@ -309,8 +309,9 @@ peers:
 - Each write is queued under `db.dir/peers-wal` before the client gets its
   reply, and sent to every peer in the background, in order. The queue is
   fsynced as `db.fsync` says, like the local data. A peer that cannot be
-  reached is retried until it comes back. A write a peer rejects as invalid is
-  dropped.
+  reached is retried until it comes back. Its queue has no limit, so while it
+  is down every write adds its path and body to the queue, on disk and in
+  memory. A write a peer rejects as invalid is dropped.
 - Nothing resolves conflicts. Two nodes that change the same key at about the
   same time can end up with different values.
 

@@ -276,15 +276,6 @@ func newTestWorker(t *testing.T, addr string) *workerState {
 	return &workerState{addr: addr, ch: make(chan struct{}, 1), walPath: walPathForAddr(addr)}
 }
 
-func TestEnqueueQueueFull(t *testing.T) {
-	resetSyncState(t)
-	w := newTestWorker(t, "http://full")
-	w.pending = make([]syncOp, queueSize)
-	if _, err := w.enqueue(syncOp{Method: http.MethodPost, Path: "/vacuum"}); err == nil {
-		t.Fatal("enqueue on a full queue should fail")
-	}
-}
-
 func TestDispatchUnwritableWAL(t *testing.T) {
 	resetSyncState(t)
 	file := filepath.Join(t.TempDir(), "file")

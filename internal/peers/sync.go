@@ -24,7 +24,6 @@ import (
 
 const (
 	requestTimeout = 2 * time.Second
-	queueSize      = 1024
 	// After this many failed attempts at one op the worker logs that the peer
 	// is unreachable. It keeps retrying regardless.
 	warnAfter = 5
@@ -376,9 +375,6 @@ func (w *workerState) enqueue(op syncOp) (uint64, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if len(w.pending) >= queueSize {
-		return 0, fmt.Errorf("queue is full: %d", len(w.pending))
-	}
 	w.pending = append(w.pending, op)
 	w.seq++
 	w.signal()
@@ -587,10 +583,13 @@ func (w *workerState) checkpointLocked() (err error) {
 }
 
 // reclaimableLocked reports whether a checkpoint would drop enough records:
-// the acks and the ops they acked. The queue itself does not count, so a
-// peer that is down does not make every write rewrite the file.
+// the acks and the ops they acked, at least walCheckpointEvery of them and
+// no fewer than the ops it would write back. The queue has no limit, so the
+// second rule keeps a peer catching up on a long queue from rewriting it
+// every few acks.
 func (w *workerState) reclaimableLocked() bool {
-	return int64(w.writes-len(w.pending)) >= atomic.LoadInt64(&walCheckpointEvery)
+	dead := int64(w.writes - len(w.pending))
+	return dead >= atomic.LoadInt64(&walCheckpointEvery) && dead >= int64(len(w.pending))
 }
 
 func syncDir(dir string) error {
