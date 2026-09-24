@@ -101,3 +101,50 @@ func TestFileStoreCompactsWAL(t *testing.T) {
 		t.Fatalf("reloaded k2 mismatch: val=%q err=%v", string(v), err)
 	}
 }
+
+func TestFileStoreLoadErrors(t *testing.T) {
+	if _, err := newFileStore(""); err == nil {
+		t.Fatal("empty dir should fail")
+	}
+
+	cases := map[string]func(dir string) error{
+		"corrupt snapshot": func(dir string) error {
+			return os.WriteFile(filepath.Join(dir, "raft-state.snapshot.json"), []byte("{"), 0o600)
+		},
+		"unreadable snapshot": func(dir string) error {
+			return os.Mkdir(filepath.Join(dir, "raft-state.snapshot.json"), 0o755)
+		},
+		"corrupt wal": func(dir string) error {
+			return os.WriteFile(filepath.Join(dir, "raft-state.wal"), []byte("{\n"), 0o600)
+		},
+		"unknown wal record": func(dir string) error {
+			return os.WriteFile(filepath.Join(dir, "raft-state.wal"), []byte(`{"type":"bogus"}`+"\n"), 0o600)
+		},
+		"unreadable wal": func(dir string) error {
+			return os.Mkdir(filepath.Join(dir, "raft-state.wal"), 0o755)
+		},
+	}
+	for name, setup := range cases {
+		dir := t.TempDir()
+		if err := setup(dir); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newFileStore(dir); err == nil {
+			t.Fatalf("%s: newFileStore should fail", name)
+		}
+	}
+}
+
+func TestFileStoreEmptySnapshot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "raft-state.snapshot.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := newFileStore(dir)
+	if err != nil {
+		t.Fatalf("empty snapshot should load: %v", err)
+	}
+	if n, err := s.LastIndex(); err != nil || n != 0 {
+		t.Fatalf("LastIndex = %d, %v", n, err)
+	}
+}
