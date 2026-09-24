@@ -46,5 +46,8 @@ func reply(c fiber.Ctx, err error) error {
 	if nl, ok := cluster.AsNotLeader(err); ok {
 		return c.Status(409).JSON(fiber.Map{"error": "not leader", "leader": nl.LeaderHTTPAddr})
 	}
+	if errors.Is(err, db.ErrWritesRefused) {
+		return c.Status(503).JSON(fiber.Map{"error": err.Error()})
+	}
 	return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 }

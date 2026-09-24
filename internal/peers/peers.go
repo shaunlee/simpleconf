@@ -24,30 +24,31 @@ func whole(c fiber.Ctx) error {
 // update stores the body as sent, so a replicated value keeps its text,
 // including integers too large for a float64.
 func update(c fiber.Ctx) error {
-	if err := db.SetRaw(c.Params("key"), c.Body()); err != nil {
-		var je *db.JSONError
-		if errors.As(err, &je) {
-			return c.Status(422).JSON(fiber.Map{"error": je.Error()})
-		}
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	return c.Status(202).JSON(fiber.Map{"ok": true})
+	return reply(c, db.SetRaw(c.Params("key"), c.Body()))
 }
 
 func forget(c fiber.Ctx) error {
-	db.Del(c.Params("key"))
-
-	return c.Status(202).JSON(fiber.Map{"ok": true})
+	return reply(c, db.Del(c.Params("key")))
 }
 
 func clone(c fiber.Ctx) error {
-	db.Clone(
-		c.Params("from_key"),
-		c.Params("to_key"),
-	)
+	return reply(c, db.Clone(c.Params("from_key"), c.Params("to_key")))
+}
 
-	return c.Status(202).JSON(fiber.Map{"ok": true})
+// reply maps a local write's result for the peer that sent it. 503 tells
+// the peer to retry; a 4xx makes it drop the write.
+func reply(c fiber.Ctx, err error) error {
+	if err == nil {
+		return c.Status(202).JSON(fiber.Map{"ok": true})
+	}
+	var je *db.JSONError
+	switch {
+	case errors.As(err, &je):
+		return c.Status(422).JSON(fiber.Map{"error": je.Error()})
+	case errors.Is(err, db.ErrWritesRefused):
+		return c.Status(503).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 }
 
 func vacuum(c fiber.Ctx) error {

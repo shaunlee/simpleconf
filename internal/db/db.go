@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	stdjson "encoding/json"
+	"errors"
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/tidwall/gjson"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -182,6 +184,28 @@ func quoteJSONString(s string) string {
 	return b.String()
 }
 
+// ErrWritesRefused is returned for a write made while the AOF cannot be
+// written, under db.fsync everysec or no. Reads still work, and writes are
+// accepted again once the pending records reach the file.
+var ErrWritesRefused = errors.New("writes refused: the append-only file cannot be written")
+
+var (
+	writesRefused atomic.Bool
+
+	// Replaced by tests to simulate a failing disk and to observe an exit.
+	writeFile = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
+	syncFile  = func(f *os.File) error { return f.Sync() }
+	fatalf    = log.Fatalf
+	tickEvery = time.Second
+)
+
+func checkWritable() error {
+	if aofEnabled && writesRefused.Load() {
+		return ErrWritesRefused
+	}
+	return nil
+}
+
 // JSONError is bad JSON from a client write. Callers map it to 422.
 type JSONError struct{ Err error }
 
@@ -310,6 +334,9 @@ func setrawonly(k string, raw []byte) error {
 // SetRaw writes client JSON. Plain scalars are stored in one copy; anything
 // else is decoded with json.Number so an integer is not rounded through float64.
 func SetRaw(k string, raw []byte) error {
+	if err := checkWritable(); err != nil {
+		return err
+	}
 	raw = bytes.TrimSpace(raw)
 	if leaf, ok := canonicalScalar(raw); ok {
 		if err := setNode(k, leaf); err != nil {
@@ -344,6 +371,9 @@ func decodeJSON(raw []byte) (any, error) {
 }
 
 func Set(k string, v any) error {
+	if err := checkWritable(); err != nil {
+		return err
+	}
 	val, err := valueToNode(v)
 	if err != nil {
 		return err
@@ -378,9 +408,13 @@ func delonly(k string) {
 	configStale = true
 }
 
-func Del(k string) {
+func Del(k string) error {
+	if err := checkWritable(); err != nil {
+		return err
+	}
 	delonly(k)
 	appendAOF(persistable{command: delCmd, key: k})
+	return nil
 }
 
 func Get(k string) string {
@@ -474,10 +508,14 @@ func cloneonly(fk, tk string) string {
 	return string(raw)
 }
 
-func Clone(fk, tk string) {
+func Clone(fk, tk string) error {
+	if err := checkWritable(); err != nil {
+		return err
+	}
 	if v := cloneonly(fk, tk); len(v) > 0 {
 		appendAOF(persistable{command: setRawCmd, key: tk, value: v})
 	}
+	return nil
 }
 
 func Vacuum() {
@@ -639,12 +677,12 @@ func reopen() error {
 // doEraseAndDump rewrites the AOF as a single snapshot record. The snapshot is
 // written and fsynced to a temp file first and then renamed over the AOF, so a
 // crash or a failed write at any point leaves a complete AOF, old or new.
-func doEraseAndDump() {
+func doEraseAndDump() error {
 	tmp := dbfn + ".tmp"
 	if err := writeSnapshotFile(tmp); err != nil {
 		log.Printf("vacuum failed, keeping the current aof: %v", err)
 		os.Remove(tmp)
-		return
+		return err
 	}
 
 	if db != nil {
@@ -662,15 +700,18 @@ func doEraseAndDump() {
 	if err := os.Link(dbfn, backup); err != nil && !os.IsNotExist(err) {
 		log.Printf("failed to keep aof backup: %v", err)
 	}
-	if err := os.Rename(tmp, dbfn); err != nil {
-		log.Printf("failed to replace aof after vacuum: %v", err)
+	renameErr := os.Rename(tmp, dbfn)
+	if renameErr != nil {
+		log.Printf("failed to replace aof after vacuum: %v", renameErr)
 	}
 	syncDir(filepath.Dir(dbfn))
 	pruneBackups()
 
 	if err := reopen(); err != nil {
 		log.Printf("failed to reopen db after vacuum: %v", err)
+		return err
 	}
+	return renameErr
 }
 
 const backupTimeLayout = "060102150405"
@@ -771,35 +812,76 @@ func Close(exit ...bool) {
 func persist() {
 	defer close(persistExit)
 
-	var w *bufio.Writer
-	if db != nil {
-		w = bufio.NewWriterSize(db, 64*1024)
-	}
-	// Writers waiting on the current batch, and whether anything has been
-	// written since the last fsync.
-	var waiters []chan struct{}
-	unsynced := false
-	// A bufio.Writer keeps its first write error, so once a write fails every
-	// later record is dropped until a vacuum replaces w. Say so once.
-	writeFailed := false
-
-	flush := func() {
-		if w == nil {
-			return
-		}
-		if err := w.Flush(); err != nil && !writeFailed {
-			writeFailed = true
-			log.Printf("failed to write aof, records are dropped until the next vacuum: %v", err)
-		}
-	}
-	syncNow := func() {
-		flush()
-		if unsynced && db != nil {
-			if err := db.Sync(); err != nil {
-				log.Printf("failed to fsync db: %v", err)
+	var (
+		buf      []byte // records not yet written to the file
+		size     int64  // the file's size after its last whole record
+		waiters  []chan struct{}
+		unsynced bool // written since the last fsync
+	)
+	statSize := func() {
+		size = 0
+		if db != nil {
+			if info, err := db.Stat(); err == nil {
+				size = info.Size()
 			}
-			unsynced = false
 		}
+	}
+	statSize()
+
+	// flush writes buf to the file. A failed or short write is cut back off
+	// the file, so a retry starts on a record boundary; buf is kept for it.
+	flush := func() error {
+		if len(buf) == 0 || db == nil {
+			return nil
+		}
+		n, err := writeFile(db, buf)
+		if err == nil && n < len(buf) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			if n > 0 {
+				if terr := db.Truncate(size); terr != nil {
+					fatalf("aof write failed (%v) and the partial record could not be removed: %v", err, terr)
+				}
+			}
+			return err
+		}
+		size += int64(n)
+		buf = buf[:0]
+		unsynced = true
+		if writesRefused.Swap(false) {
+			log.Println("aof writes recovered, accepting writes again")
+		}
+		return nil
+	}
+	// failed handles a write that did not reach the file. Under always the
+	// writers are waiting for an acknowledgement that must not come, and
+	// their changes are already in memory, so the process exits and the
+	// restart reloads the file, as Redis does. Otherwise writes are refused
+	// until a retry gets the pending records out. It reports whether to stop.
+	failed := func(err error) bool {
+		if fsyncPolicy == FsyncAlways {
+			fatalf("aof write failed under db.fsync always, exiting: %v", err)
+			return true
+		}
+		if !writesRefused.Swap(true) {
+			log.Printf("aof write failed, refusing writes until it recovers: %v", err)
+		}
+		return false
+	}
+	// syncNow fsyncs. After a failed fsync the kernel may already have
+	// dropped the unwritten pages, so a retry that succeeds proves nothing:
+	// exit and reload the file, as PostgreSQL does. It reports whether to stop.
+	syncNow := func() bool {
+		if !unsynced || db == nil {
+			return false
+		}
+		if err := syncFile(db); err != nil {
+			fatalf("aof fsync failed, exiting: %v", err)
+			return true
+		}
+		unsynced = false
+		return false
 	}
 	release := func() {
 		for _, c := range waiters {
@@ -808,34 +890,42 @@ func persist() {
 		waiters = waiters[:0]
 	}
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(tickEvery)
 	defer ticker.Stop()
 
 	write := func(row persistable) (stop bool) {
 		switch row.command {
 		case setRawCmd:
-			if w != nil {
-				// A write error sticks in w and is reported by flush.
-				_, _ = fmt.Fprintf(w, "+%s\n%s\n", row.key, row.value)
-				unsynced = true
+			if db != nil {
+				buf = fmt.Appendf(buf, "+%s\n%s\n", row.key, row.value)
 			}
 		case delCmd:
-			if w != nil {
-				_, _ = fmt.Fprintf(w, "-%s\n", row.key)
-				unsynced = true
+			if db != nil {
+				buf = fmt.Appendf(buf, "-%s\n", row.key)
 			}
 		case dumpCmd:
-			flush()
-			doEraseAndDump() // fsyncs the rewritten file itself
-			if db != nil {
-				w = bufio.NewWriterSize(db, 64*1024)
-			} else {
-				w = nil
+			if err := flush(); err != nil && failed(err) {
+				return true
 			}
-			writeFailed = false
-			unsynced = false
+			// The snapshot is the whole document, so it also covers records
+			// a failed write left pending: a vacuum that works recovers.
+			if err := doEraseAndDump(); err == nil {
+				buf = buf[:0]
+				unsynced = false
+				if writesRefused.Swap(false) {
+					log.Println("aof rewritten by vacuum, accepting writes again")
+				}
+			}
+			statSize()
 		case closeCmd:
-			syncNow()
+			if err := flush(); err != nil {
+				if failed(err) {
+					return true
+				}
+				log.Printf("aof write failed at shutdown, %d bytes of records lost: %v", len(buf), err)
+			} else if syncNow() {
+				return true
+			}
 			wg.Done()
 			release()
 			return true
@@ -844,13 +934,19 @@ func persist() {
 			waiters = append(waiters, row.done)
 		}
 		wg.Done()
+		// Bound the buffer during a long batch.
+		if len(buf) >= 64*1024 {
+			if err := flush(); err != nil && failed(err) {
+				return true
+			}
+		}
 		return false
 	}
 
 	for {
 		select {
 		case row := <-persists:
-			// Drain whatever is already queued, then pay for one flush (and,
+			// Drain whatever is already queued, then pay for one write (and,
 			// under FsyncAlways, one fsync) for the whole batch. Group commit:
 			// concurrent writers share the cost of a single fsync.
 			for {
@@ -865,14 +961,22 @@ func persist() {
 				}
 				break
 			}
-			flush()
-			if fsyncPolicy == FsyncAlways {
-				syncNow()
+			if err := flush(); err != nil {
+				if failed(err) {
+					return
+				}
+			} else if fsyncPolicy == FsyncAlways && syncNow() {
+				return
 			}
 			release()
 		case <-ticker.C:
-			if fsyncPolicy == FsyncEverysec {
-				syncNow()
+			// Retries a failed write; under everysec, also the fsync.
+			if err := flush(); err != nil {
+				if failed(err) {
+					return
+				}
+			} else if fsyncPolicy == FsyncEverysec && syncNow() {
+				return
 			}
 		}
 	}

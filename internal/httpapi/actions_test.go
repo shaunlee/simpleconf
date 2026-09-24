@@ -97,6 +97,7 @@ func TestReply(t *testing.T) {
 		{"bad json", &db.JSONError{Err: errors.New("unexpected end")}, http.StatusUnprocessableEntity, `{"error":"unexpected end"}`},
 		{"not leader", &cluster.NotLeaderError{LeaderHTTPAddr: "http://10.0.0.1:23456"}, http.StatusConflict, `{"error":"not leader","leader":"http://10.0.0.1:23456"}`},
 		{"other", errors.New("boom"), http.StatusBadRequest, `{"error":"boom"}`},
+		{"writes refused", db.ErrWritesRefused, http.StatusServiceUnavailable, `{"error":"writes refused: the append-only file cannot be written"}`},
 	}
 	for _, c := range cases {
 		app := fiber.New()

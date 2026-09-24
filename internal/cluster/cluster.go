@@ -474,11 +474,9 @@ func applyLocal(c command) error {
 	case "set":
 		return db.Set(c.Key, c.Value)
 	case "del":
-		db.Del(c.Key)
-		return nil
+		return db.Del(c.Key)
 	case "clone":
-		db.Clone(c.FromKey, c.ToKey)
-		return nil
+		return db.Clone(c.FromKey, c.ToKey)
 	case "vacuum":
 		db.Vacuum()
 		return nil

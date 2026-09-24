@@ -120,9 +120,10 @@ A value is stored as the JSON text the client sent, so an integer such as
 | `POST /vacuum` | rewrite the append-only file as one snapshot | `202 {"ok":true}` |
 
 Writes can fail with `422` for a body that is not valid JSON, `400` for a path
-that cannot be written (such as a non-numeric index into an array), and, in a
-Raft cluster, `409` from a follower that does not forward writes. Each error
-body is `{"error":"..."}`.
+that cannot be written (such as a non-numeric index into an array), `503`
+while the append-only file cannot be written (see [Durability](#durability)),
+and, in a Raft cluster, `409` from a follower that does not forward writes.
+Each error body is `{"error":"..."}`.
 
 ## TCP protocol
 
@@ -217,6 +218,24 @@ expect on real hardware.
 `everysec` and `no` both survive `kill -9`, because the writer flushes each
 batch to the kernel before going idle; they differ only in exposure to power
 loss.
+
+When the disk fails, simpleconf does what Redis and PostgreSQL do rather than
+undo writes in memory:
+
+- A write to the file fails (a full disk, say): under `always` the server
+  exits without answering the writers still waiting, and a restart reloads the
+  file, so nothing that was not stored survives. Under `everysec` and `no` it
+  cuts the partial record off the file and refuses writes, with HTTP `503` or
+  TCP `-ERR`, while reads carry on; it retries every second and accepts writes
+  again once the pending records are stored. A vacuum that succeeds also ends
+  the refusal.
+- An fsync fails: the server exits under `always` and `everysec`. After a
+  failed fsync the kernel may already have dropped the unwritten data, so a
+  later fsync that succeeds proves nothing.
+
+Run it under a supervisor that restarts it, such as systemd or Docker's
+`--restart`. If the disk is still broken, the restart fails too, so the fault
+cannot go unnoticed.
 
 A vacuum, and every clean shutdown, rewrites the file as one snapshot. The
 snapshot is written to a temporary file and renamed into place, and the
