@@ -15,6 +15,7 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/shaunlee/simpleconf/internal/cluster"
 	"github.com/shaunlee/simpleconf/internal/db"
 )
 
@@ -30,11 +31,14 @@ func eventually(t *testing.T, within time.Duration, fn func() bool) bool {
 	return fn()
 }
 
-// recorder is a fake peer that answers with fail(path) and logs each request.
+// recorder is a fake peer that logs each request. fail(path, n), given the
+// path and how many times it has been requested, picks a failure; failStatus
+// is the status sent for one, 500 by default.
 type recorder struct {
-	mu   sync.Mutex
-	reqs []string
-	fail func(path string, n int) bool
+	mu         sync.Mutex
+	reqs       []string
+	fail       func(path string, n int) bool
+	failStatus int
 }
 
 func (r *recorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -48,7 +52,11 @@ func (r *recorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Unlock()
 	if r.fail != nil && r.fail(req.URL.Path, n) {
-		w.WriteHeader(http.StatusInternalServerError)
+		status := r.failStatus
+		if status == 0 {
+			status = http.StatusInternalServerError
+		}
+		w.WriteHeader(status)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -134,22 +142,121 @@ func TestSyncRetriesThenSucceeds(t *testing.T) {
 	}
 }
 
-func TestSyncDropsAfterMaxRetries(t *testing.T) {
+// fastRetry shrinks the backoff so retry tests run in milliseconds.
+func fastRetry(t *testing.T) {
+	t.Helper()
+	base, limit := retryBase.Load(), retryCap.Load()
+	retryBase.Store(int64(time.Millisecond))
+	retryCap.Store(int64(5 * time.Millisecond))
+	t.Cleanup(func() {
+		retryBase.Store(base)
+		retryCap.Store(limit)
+	})
+}
+
+func TestSyncKeepsRetryingUnreachablePeer(t *testing.T) {
 	resetSyncState(t)
-	rec := &recorder{fail: func(path string, n int) bool { return path == "/db/drop" }}
+	fastRetry(t)
+	// Fail well past warnAfter, then recover.
+	rec := &recorder{fail: func(path string, n int) bool { return path == "/db/flaky" && n <= 3*warnAfter }}
 	srv := httptest.NewServer(rec)
 	defer srv.Close()
 	Configure([]string{srv.URL})
 
-	SyncDelete("drop")
+	SyncDelete("flaky")
 	SyncVacuum()
 
-	// Five attempts sleep 100+200+400+800ms before the op is dropped.
 	if !eventually(t, 5*time.Second, func() bool { return rec.count("POST /vacuum") == 1 }) {
-		t.Fatalf("queue stayed blocked: peer got %q", rec.requests())
+		t.Fatalf("queue did not drain: peer got %d requests", len(rec.requests()))
 	}
-	if got := rec.count("DELETE /db/drop"); got != maxRetries {
-		t.Fatalf("dropped op attempts = %d want %d", got, maxRetries)
+	if got, want := rec.count("DELETE /db/flaky"), 3*warnAfter+1; got != want {
+		t.Fatalf("attempts at the failing op = %d want %d", got, want)
+	}
+}
+
+func TestSyncDropsRejectedOp(t *testing.T) {
+	resetSyncState(t)
+	fastRetry(t)
+	rec := &recorder{
+		fail:       func(path string, n int) bool { return path == "/db/bad" },
+		failStatus: http.StatusUnprocessableEntity,
+	}
+	srv := httptest.NewServer(rec)
+	defer srv.Close()
+	Configure([]string{srv.URL})
+
+	SyncDelete("bad")
+	SyncVacuum()
+
+	if !eventually(t, 2*time.Second, func() bool { return rec.count("POST /vacuum") == 1 }) {
+		t.Fatalf("queue blocked behind a rejected op: %q", rec.requests())
+	}
+	if got := rec.count("DELETE /db/bad"); got != 1 {
+		t.Fatalf("a rejected op was sent %d times, want once", got)
+	}
+}
+
+func TestIsRejected(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{errors.New("connection refused"), false},
+		{&statusError{code: 400}, true},
+		{&statusError{code: 404}, true},
+		{&statusError{code: 422}, true},
+		{&statusError{code: 408}, false},
+		{&statusError{code: 429}, false},
+		{&statusError{code: 500}, false},
+		{&statusError{code: 503}, false},
+	}
+	for _, c := range cases {
+		if got := isRejected(c.err); got != c.want {
+			t.Fatalf("isRejected(%v) = %v want %v", c.err, got, c.want)
+		}
+	}
+}
+
+func TestSyncWriteSendsRawText(t *testing.T) {
+	resetSyncState(t)
+	type req struct{ method, path, ctype, body string }
+	var (
+		mu   sync.Mutex
+		reqs []req
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		reqs = append(reqs, req{r.Method, r.URL.Path, r.Header.Get("Content-Type"), string(b)})
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+	Configure([]string{srv.URL})
+
+	SyncWrite(cluster.Write{Op: "set", Key: "n", Raw: []byte(`{"big":9007199254740993}`)})
+	SyncWrite(cluster.Write{Op: "del", Key: "old"})
+	SyncWrite(cluster.Write{Op: "clone", FromKey: "a", ToKey: "b"})
+	SyncWrite(cluster.Write{Op: "vacuum"}) // not replicated
+
+	want := []req{
+		{http.MethodPut, "/db/n", "application/json", `{"big":9007199254740993}`},
+		{http.MethodDelete, "/db/old", "", ""},
+		{http.MethodPost, "/clone/a/b", "", ""},
+	}
+	if !eventually(t, 2*time.Second, func() bool { mu.Lock(); defer mu.Unlock(); return len(reqs) >= len(want) }) {
+		t.Fatalf("peer got %v", reqs)
+	}
+	time.Sleep(50 * time.Millisecond) // anything extra would have arrived by now
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reqs) != len(want) {
+		t.Fatalf("peer got %d requests %v, want %d", len(reqs), reqs, len(want))
+	}
+	for i := range want {
+		if reqs[i] != want[i] {
+			t.Fatalf("request %d = %+v want %+v", i, reqs[i], want[i])
+		}
 	}
 }
 

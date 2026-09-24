@@ -83,6 +83,13 @@ func TestSingleNodeRaft(t *testing.T) {
 	m := startSingle(t, dir)
 	waitLeader(t, m)
 	useDefault(t, m)
+	// Raft replicates on its own; the peers hook must stay out of it.
+	writes := recordWrites(t)
+	defer func() {
+		if got := writes(); len(got) != 0 {
+			t.Fatalf("hook called with Raft enabled: %+v", got)
+		}
+	}()
 
 	if got, want := m.leaderHTTPAddr(), "http://127.0.0.1:8080"; got != want {
 		t.Fatalf("leaderHTTPAddr = %q want %q", got, want)

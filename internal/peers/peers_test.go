@@ -27,6 +27,7 @@ func TestPeerRoutes(t *testing.T) {
 	}{
 		{http.MethodPut, "/db/a", `{"b":1}`, http.StatusAccepted, "a.b", "1"},
 		{http.MethodPut, "/db/a", `{`, http.StatusUnprocessableEntity, "a.b", "1"},
+		{http.MethodPut, "/db/big", `9007199254740993`, http.StatusAccepted, "big", "9007199254740993"},
 		{http.MethodPut, "/db/arr", `[1]`, http.StatusAccepted, "arr", "[1]"},
 		{http.MethodPut, "/db/arr.x", `2`, http.StatusBadRequest, "arr", "[1]"},
 		{http.MethodPost, "/clone/a/c", "", http.StatusAccepted, "c.b", "1"},

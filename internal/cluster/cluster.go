@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -200,12 +201,66 @@ func ApplySet(key string, value any) error {
 	return getDefault().ApplySet(key, value)
 }
 
+// Write describes a client write that succeeded locally with Raft disabled.
+// Raw is the value's JSON text for a set. Vacuum is not reported: it only
+// compacts this node's own file.
+type Write struct {
+	Op             string // "set", "del" or "clone"
+	Key            string
+	Raw            []byte
+	FromKey, ToKey string
+}
+
+var localWriteHook atomic.Pointer[func(Write)]
+
+// SetLocalWriteHook installs fn to be called after each successful write with
+// Raft disabled; nil removes it. The legacy peers mode uses it to replicate.
+// fn runs on the writer's goroutine and owns the Write it is given.
+func SetLocalWriteHook(fn func(Write)) {
+	if fn == nil {
+		localWriteHook.Store(nil)
+		return
+	}
+	localWriteHook.Store(&fn)
+}
+
+func notifyLocalWrite(c command) {
+	fn := localWriteHook.Load()
+	if fn == nil {
+		return
+	}
+	var w Write
+	switch c.Op {
+	case "set":
+		raw, err := json.Marshal(c.Value)
+		if err != nil {
+			log.Printf("failed to encode %q for the write hook: %v", c.Key, err)
+			return
+		}
+		w = Write{Op: "set", Key: strings.Clone(c.Key), Raw: raw}
+	case "del":
+		w = Write{Op: "del", Key: strings.Clone(c.Key)}
+	case "clone":
+		w = Write{Op: "clone", FromKey: strings.Clone(c.FromKey), ToKey: strings.Clone(c.ToKey)}
+	default:
+		return
+	}
+	(*fn)(w)
+}
+
 // ApplySetRaw writes JSON text from a client. With Raft disabled the bytes
 // are stored directly; a leader still decodes them into the existing log record.
 func ApplySetRaw(key string, raw []byte) error {
 	m := getDefault()
 	if !m.enabled || m.raft == nil {
-		return db.SetRaw(key, raw)
+		if err := db.SetRaw(key, raw); err != nil {
+			return err
+		}
+		// The key and body may alias a request buffer the server reuses.
+		if fn := localWriteHook.Load(); fn != nil {
+			(*fn)(Write{Op: "set", Key: strings.Clone(key), Raw: bytes.Clone(bytes.TrimSpace(raw))})
+		}
+		return nil
 	}
 	v, err := decodeJSON(raw)
 	if err != nil {
@@ -264,7 +319,11 @@ func ApplyVacuum() error {
 
 func (m *Manager) apply(c command) error {
 	if !m.enabled || m.raft == nil {
-		return applyLocal(c)
+		if err := applyLocal(c); err != nil {
+			return err
+		}
+		notifyLocalWrite(c)
+		return nil
 	}
 	if m.raft.State() != raft.Leader {
 		leader := m.leaderHTTPAddr()

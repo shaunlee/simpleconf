@@ -1,6 +1,7 @@
 package peers
 
 import (
+	"errors"
 	"log"
 	"sync"
 
@@ -20,12 +21,14 @@ func whole(c fiber.Ctx) error {
 	return c.SendString(db.Get(""))
 }
 
+// update stores the body as sent, so a replicated value keeps its text,
+// including integers too large for a float64.
 func update(c fiber.Ctx) error {
-	var v any
-	if err := json.Unmarshal(c.Body(), &v); err != nil {
-		return c.Status(422).JSON(fiber.Map{"error": err.Error()})
-	}
-	if err := db.Set(c.Params("key"), v); err != nil {
+	if err := db.SetRaw(c.Params("key"), c.Body()); err != nil {
+		var je *db.JSONError
+		if errors.As(err, &je) {
+			return c.Status(422).JSON(fiber.Map{"error": je.Error()})
+		}
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 

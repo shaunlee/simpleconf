@@ -48,6 +48,9 @@ func main() {
 
 	if !cfg.Raft.Enabled {
 		peers.Restore(cfg.PeerAddrs)
+		if len(cfg.PeerAddrs) > 0 {
+			cluster.SetLocalWriteHook(peers.SyncWrite)
+		}
 
 		if len(cfg.PeerListen) > 0 {
 			log.Println("peer server listening on", cfg.PeerListen)

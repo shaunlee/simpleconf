@@ -18,16 +18,32 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/shaunlee/simpleconf/internal/cluster"
 	"github.com/shaunlee/simpleconf/internal/db"
 )
 
 const (
 	requestTimeout = 2 * time.Second
 	queueSize      = 1024
-	maxRetries     = 5
+	// After this many failed attempts at one op the worker logs that the peer
+	// is unreachable. It keeps retrying regardless.
+	warnAfter = 5
 )
 
-var walCheckpointEvery int64 = 512
+var (
+	walCheckpointEvery int64 = 512
+
+	// backoff starts at retryBase and doubles up to retryCap. Workers read
+	// them while running, hence atomics.
+	retryBase = newDuration(100 * time.Millisecond)
+	retryCap  = newDuration(1500 * time.Millisecond)
+)
+
+func newDuration(d time.Duration) *atomic.Int64 {
+	v := new(atomic.Int64)
+	v.Store(int64(d))
+	return v
+}
 
 type syncOp struct {
 	Method      string `json:"method"`
@@ -118,6 +134,30 @@ func SyncUpdate(key string, value any) {
 		Body:        v,
 		ContentType: "application/json",
 	})
+}
+
+// SyncSetRaw replicates a set whose value is already JSON text, as a client
+// sent it, so the peer stores the same text.
+func SyncSetRaw(key string, raw []byte) {
+	dispatch(syncOp{
+		Method:      http.MethodPut,
+		Path:        "/db/" + key,
+		Body:        raw,
+		ContentType: "application/json",
+	})
+}
+
+// SyncWrite replicates one local write to every peer. It is installed with
+// cluster.SetLocalWriteHook in peers mode.
+func SyncWrite(w cluster.Write) {
+	switch w.Op {
+	case "set":
+		SyncSetRaw(w.Key, w.Raw)
+	case "del":
+		SyncDelete(w.Key)
+	case "clone":
+		SyncClone(w.FromKey, w.ToKey)
+	}
 }
 
 func SyncDelete(key string) {
@@ -259,6 +299,10 @@ func (w *workerState) signal() {
 	}
 }
 
+// run sends queued ops to the peer in order. An op the peer cannot be reached
+// for is retried until it goes through, so a peer that is down for a while
+// catches up when it returns. An op the peer rejects with a 4xx is dropped,
+// since sending it again would not change the answer.
 func (w *workerState) run() {
 	for range w.ch {
 		for {
@@ -267,24 +311,21 @@ func (w *workerState) run() {
 				break
 			}
 
-			ok = false
-			for i := 0; i < maxRetries; i++ {
-				if _, err := doRequest(op, w.addr); err != nil {
-					if i == maxRetries-1 {
-						log.Println("failed to sync", w.addr+op.Path, err)
-						break
-					}
-					time.Sleep(backoff(i))
-					continue
+			for attempt := 0; ; attempt++ {
+				_, err := doRequest(op, w.addr)
+				if err == nil {
+					break
 				}
-				ok = true
-				break
+				if isRejected(err) {
+					log.Printf("dropping sync op rejected by %s: %s %s: %v", w.addr, op.Method, op.Path, err)
+					break
+				}
+				if attempt+1 == warnAfter {
+					log.Printf("peer %s unreachable, still retrying %s %s: %v", w.addr, op.Method, op.Path, err)
+				}
+				time.Sleep(backoff(attempt))
 			}
 
-			if !ok {
-				log.Printf("dropping sync op after max retries for %s: %s", w.addr, op.Path)
-				// fallthrough and ack it to unblock the rest of the queue
-			}
 			if err := w.ack(); err != nil {
 				log.Println("failed to ack wal", w.addr, err)
 				time.Sleep(backoff(0))
@@ -435,9 +476,27 @@ func doRequest(op syncOp, addr string) (string, error) {
 
 	body, _ := readBody(resp)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return body, fmt.Errorf("status=%s body=%s", resp.Status, body)
+		return body, &statusError{code: resp.StatusCode, status: resp.Status, body: body}
 	}
 	return body, nil
+}
+
+type statusError struct {
+	code         int
+	status, body string
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("status=%s body=%s", e.status, e.body) }
+
+// isRejected reports a 4xx other than a timeout or rate limit: the peer
+// understood the op and refused it.
+func isRejected(err error) bool {
+	var se *statusError
+	if !errors.As(err, &se) {
+		return false
+	}
+	return se.code >= 400 && se.code < 500 &&
+		se.code != http.StatusRequestTimeout && se.code != http.StatusTooManyRequests
 }
 
 func readBody(resp *http.Response) (string, error) {
@@ -452,12 +511,16 @@ func readBody(resp *http.Response) (string, error) {
 }
 
 func backoff(attempt int) time.Duration {
-	if attempt < 0 {
-		return 100 * time.Millisecond
+	base := time.Duration(retryBase.Load())
+	limit := time.Duration(retryCap.Load())
+	if attempt <= 0 {
+		return base
 	}
-	d := 100 * time.Millisecond * time.Duration(1<<attempt)
-	if d > 1500*time.Millisecond {
-		return 1500 * time.Millisecond
+	if attempt > 16 {
+		return limit
 	}
-	return d
+	if d := base << attempt; d < limit {
+		return d
+	}
+	return limit
 }
