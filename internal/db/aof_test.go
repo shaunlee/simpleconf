@@ -192,3 +192,37 @@ func TestInitCreatesDir(t *testing.T) {
 		t.Fatalf("AOF not created in a new directory: %v", err)
 	}
 }
+
+// A crash in the middle of a write leaves the AOF ending in part of a record.
+// It is cut off on load, so the next write is stored under its own key and
+// survives the next restart.
+func TestAOFTornTail(t *testing.T) {
+	cases := map[string]string{
+		"key line cut":       "+a\n1\n+ha",
+		"value line missing": "+a\n1\n+half\n",
+		"value line cut":     "+a\n1\n+half\n12",
+		"dump cut":           "+a\n1\n*\n{\"a\"",
+		"delete cut":         "+a\n1\n-go",
+		"blank line":         "\n+a\n1\n",
+	}
+	for name, aof := range cases {
+		resetConfig()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "data.aof"), []byte(aof), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		Init(dir)
+		if err := Set("new", 3); err != nil {
+			t.Fatal(err)
+		}
+		Close()
+
+		resetConfig()
+		Init(dir)
+		got := Get("")
+		Close()
+		if want := `{"a":1,"new":3}`; got != want {
+			t.Fatalf("%s: reloaded %s want %s (aof %q)", name, got, want, readAOF(t, dir))
+		}
+	}
+}

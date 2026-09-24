@@ -513,45 +513,86 @@ func Init(dir string) {
 			log.Fatalf("failed to open db: %v", err)
 		}
 
-		reader := bufio.NewReader(db)
-	loop:
-		for {
-			kl := readline(reader)
-			if kl == nil {
-				break
-			}
-
-			switch kl[0] {
-			case '+':
-				if vl := readline(reader); vl == nil {
-					break loop
-				} else {
-					if err := setrawonly(string(kl[1:]), vl); err != nil {
-						log.Printf("skipping bad aof record for %q: %v", kl[1:], err)
-					}
-				}
-			case '*':
-				if vl := readline(reader); vl == nil {
-					break loop
-				} else {
-					root, ok := parseTreeRaw(vl).(*treeObj)
-					if !ok {
-						root = newTreeObj()
-					}
-					configMu.Lock()
-					configRoot = root
-					configStale = true
-					configMu.Unlock()
-				}
-			case '-':
-				delonly(string(kl[1:]))
-			}
+		if err := replayAOF(); err != nil {
+			log.Fatalf("failed to load db: %v", err)
 		}
 	}
 
 	persistExit = make(chan struct{})
 	go persist()
 	log.Println("db loaded")
+}
+
+// replayAOF loads the AOF into memory. A record the file ends in the middle
+// of, left by a crash during a write, is cut off, so the next append starts
+// on a line of its own instead of running on from the partial one.
+func replayAOF() error {
+	reader := bufio.NewReader(db)
+	var good int64 // offset just past the last whole record
+loop:
+	for {
+		kl, ok := readRecordLine(reader)
+		if !ok {
+			break
+		}
+		size := int64(len(kl)) + 1
+		if len(kl) == 0 {
+			good += size
+			continue
+		}
+
+		switch kl[0] {
+		case '+':
+			vl, ok := readRecordLine(reader)
+			if !ok {
+				break loop
+			}
+			size += int64(len(vl)) + 1
+			if err := setrawonly(string(kl[1:]), vl); err != nil {
+				log.Printf("skipping bad aof record for %q: %v", kl[1:], err)
+			}
+		case '*':
+			vl, ok := readRecordLine(reader)
+			if !ok {
+				break loop
+			}
+			size += int64(len(vl)) + 1
+			root, ok := parseTreeRaw(vl).(*treeObj)
+			if !ok {
+				root = newTreeObj()
+			}
+			configMu.Lock()
+			configRoot = root
+			configStale = true
+			configMu.Unlock()
+		case '-':
+			delonly(string(kl[1:]))
+		}
+		good += size
+	}
+
+	info, err := db.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() > good {
+		log.Printf("dropping an incomplete last aof record (%d bytes)", info.Size()-good)
+		if err := db.Truncate(good); err != nil {
+			return err
+		}
+		return db.Sync()
+	}
+	return nil
+}
+
+// readRecordLine reads one line without its newline. ok is false at the end
+// of the file, including a last line with no newline, which is incomplete.
+func readRecordLine(reader *bufio.Reader) (line []byte, ok bool) {
+	b, err := reader.ReadBytes('\n')
+	if err != nil {
+		return nil, false
+	}
+	return b[:len(b)-1], true
 }
 
 func stopPersist() {
