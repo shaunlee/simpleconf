@@ -29,8 +29,7 @@ type persistable struct {
 type cmd uint8
 
 const (
-	setCmd = cmd(iota)
-	delCmd
+	delCmd = cmd(iota)
 	dumpCmd
 	setRawCmd
 	closeCmd
@@ -660,16 +659,6 @@ func persist() {
 
 	write := func(row persistable) (stop bool) {
 		switch row.command {
-		case setCmd:
-			if w != nil {
-				pv, err := json.Marshal(row.value)
-				if err != nil {
-					log.Printf("failed to marshal value for key %s: %v", row.key, err)
-				} else {
-					fmt.Fprintf(w, "+%s\n%s\n", row.key, pv)
-					unsynced = true
-				}
-			}
 		case setRawCmd:
 			if w != nil {
 				fmt.Fprintf(w, "+%s\n%s\n", row.key, row.value)
