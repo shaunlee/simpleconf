@@ -20,14 +20,18 @@ test:
 cover:
 	go test -cover $(PKGS)
 
-IMAGE   ?= shonhen/simpleconf
-VERSION ?= $(shell git describe --tags --always --dirty)
+IMAGE     ?= shonhen/simpleconf
+VERSION   ?= $(shell git describe --tags --always --dirty)
+PLATFORMS ?= linux/amd64,linux/arm64
 
+# Builds for this machine's platform only, into the local image store.
 .PHONY: docker
 docker:
 	docker build -f docker/Dockerfile -t $(IMAGE):$(VERSION) -t $(IMAGE):latest .
 
+# A multi-platform image cannot be loaded locally, so it is built and pushed
+# in one step.
 .PHONY: docker-push
-docker-push: docker
-	docker push $(IMAGE):$(VERSION)
-	docker push $(IMAGE):latest
+docker-push:
+	docker buildx build -f docker/Dockerfile --platform $(PLATFORMS) \
+		-t $(IMAGE):$(VERSION) -t $(IMAGE):latest --push .
