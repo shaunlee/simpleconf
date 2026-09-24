@@ -56,6 +56,13 @@ func vacuum(c fiber.Ctx) error {
 func Listen(addr string, peerAddrs []string) {
 	Configure(peerAddrs)
 
+	if err := newApp().Listen(addr, fiber.ListenConfig{DisableStartupMessage: true}); err != nil {
+		log.Panic(err)
+	}
+}
+
+// newApp builds the peer-facing routes, which apply writes to the local db only.
+func newApp() *fiber.App {
 	app := fiber.New(fiber.Config{
 		JSONEncoder: json.Marshal,
 		JSONDecoder: json.Unmarshal,
@@ -67,10 +74,7 @@ func Listen(addr string, peerAddrs []string) {
 	app.Delete("/db/:key", forget)
 	app.Post("/clone/:from_key/:to_key", clone)
 	app.Post("/vacuum", vacuum)
-
-	if err := app.Listen(addr, fiber.ListenConfig{DisableStartupMessage: true}); err != nil {
-		log.Panic(err)
-	}
+	return app
 }
 
 func Configure(peerAddrs []string) {
