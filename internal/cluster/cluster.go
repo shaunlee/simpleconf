@@ -86,8 +86,10 @@ type Manager struct {
 	mu         sync.RWMutex
 	raft       *raft.Raft
 	store      *fileStore
+	nodeID     string
 	raftAddr   string
 	httpAddr   string
+	idToHTTP   map[string]string
 	raftToHTTP map[string]string
 }
 
@@ -181,9 +183,19 @@ func Start(cfg Config) (*Manager, error) {
 		}
 	}
 
+	// Raft reports the leader by the address its transport advertises, which
+	// is the resolved IP when the config names a host. Look the leader up by
+	// ID first; the address map covers peers listed without an ID.
+	idToHTTP := make(map[string]string, len(cfg.Peers))
 	raftToHTTP := make(map[string]string, len(cfg.Peers)+1)
 	for _, p := range cfg.Peers {
-		if len(p.RaftAddr) > 0 && len(p.HTTPAddr) > 0 {
+		if len(p.HTTPAddr) == 0 {
+			continue
+		}
+		if len(p.ID) > 0 {
+			idToHTTP[p.ID] = normalizeHTTPAddr(p.HTTPAddr)
+		}
+		if len(p.RaftAddr) > 0 {
 			raftToHTTP[p.RaftAddr] = normalizeHTTPAddr(p.HTTPAddr)
 		}
 	}
@@ -193,8 +205,10 @@ func Start(cfg Config) (*Manager, error) {
 
 	m.raft = r
 	m.store = store
+	m.nodeID = cfg.NodeID
 	m.raftAddr = cfg.RaftAddr
 	m.httpAddr = normalizeHTTPAddr(cfg.HTTPAddr)
+	m.idToHTTP = idToHTTP
 	m.raftToHTTP = raftToHTTP
 	fsync := "always"
 	if lazySync {
@@ -380,14 +394,17 @@ func (m *Manager) leaderHTTPAddr() string {
 	if m.raft == nil {
 		return ""
 	}
-	leaderRaftAddr := string(m.raft.Leader())
-	if len(leaderRaftAddr) == 0 {
+	addr, id := m.raft.LeaderWithID()
+	if len(addr) == 0 {
 		return ""
 	}
-	if leaderRaftAddr == m.raftAddr {
+	if string(id) == m.nodeID || string(addr) == m.raftAddr {
 		return m.httpAddr
 	}
-	return m.raftToHTTP[leaderRaftAddr]
+	if h, ok := m.idToHTTP[string(id)]; ok {
+		return h
+	}
+	return m.raftToHTTP[string(addr)]
 }
 
 func (m *Manager) forwardToLeader(c command, leader string) error {

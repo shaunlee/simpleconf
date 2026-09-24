@@ -127,6 +127,35 @@ func TestSingleNodeRaft(t *testing.T) {
 	waitLeader(t, m)
 }
 
+// The transport advertises the resolved address, 127.0.0.1:port, while the
+// config says localhost:port; the leader must still be found by its ID.
+func TestLeaderHTTPAddrHostname(t *testing.T) {
+	useDB(t)
+	_, port, err := net.SplitHostPort(freeAddr(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := net.JoinHostPort("localhost", port)
+	m, err := Start(Config{
+		Enabled:   true,
+		NodeID:    "n1",
+		RaftAddr:  addr,
+		HTTPAddr:  "127.0.0.1:8080",
+		Dir:       t.TempDir(),
+		Bootstrap: true,
+		Peers:     []Peer{{ID: "n1", RaftAddr: addr, HTTPAddr: "127.0.0.1:8080"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+	waitLeader(t, m)
+
+	if got, want := m.leaderHTTPAddr(), "http://127.0.0.1:8080"; got != want {
+		t.Fatalf("leaderHTTPAddr = %q want %q", got, want)
+	}
+}
+
 func TestNoLeader(t *testing.T) {
 	addr := freeAddr(t)
 	m, err := Start(Config{Enabled: true, Forward: true, NodeID: "n1", RaftAddr: addr, Dir: t.TempDir()})
