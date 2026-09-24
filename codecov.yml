@@ -1,0 +1,4 @@
+# cmd/ holds only the thin main packages; the logic they wire up lives in
+# internal/ and is covered there.
+ignore:
+  - "cmd/**"
