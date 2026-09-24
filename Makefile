@@ -20,6 +20,14 @@ test:
 cover:
 	go test -cover $(PKGS)
 
+IMAGE   ?= shonhen/simpleconf
+VERSION ?= $(shell git describe --tags --always --dirty)
+
 .PHONY: docker
 docker:
-	cd docker && docker build -t shonhen/simpleconf . && docker push shonhen/simpleconf
+	docker build -f docker/Dockerfile -t $(IMAGE):$(VERSION) -t $(IMAGE):latest .
+
+.PHONY: docker-push
+docker-push: docker
+	docker push $(IMAGE):$(VERSION)
+	docker push $(IMAGE):latest

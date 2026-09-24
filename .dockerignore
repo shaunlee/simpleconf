@@ -1,0 +1,7 @@
+.git
+.github
+data
+docs
+/simpleconf
+/simpleconf-bench
+coverage.out
