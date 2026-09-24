@@ -3,8 +3,11 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestParseFsyncPolicy(t *testing.T) {
@@ -223,6 +226,123 @@ func TestAOFTornTail(t *testing.T) {
 		Close()
 		if want := `{"a":1,"new":3}`; got != want {
 			t.Fatalf("%s: reloaded %s want %s (aof %q)", name, got, want, readAOF(t, dir))
+		}
+	}
+}
+
+// fakeClock makes every vacuum see a time one second after the last, so each
+// backup gets its own name.
+func fakeClock(t *testing.T) {
+	t.Helper()
+	var tick atomic.Int64
+	start := time.Date(2026, 1, 2, 3, 4, 0, 0, time.UTC)
+	prev := now
+	now = func() time.Time { return start.Add(time.Duration(tick.Add(1)) * time.Second) }
+	t.Cleanup(func() { now = prev })
+}
+
+func withBackups(t *testing.T, n int) {
+	t.Helper()
+	prev := backups
+	SetBackups(n)
+	t.Cleanup(func() { SetBackups(prev) })
+}
+
+func backupNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "data.aof.") {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
+// vacuumTimes writes and vacuums n times, then closes the db.
+func vacuumTimes(t *testing.T, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if err := Set("k", i); err != nil {
+			t.Fatal(err)
+		}
+		Vacuum()
+	}
+	Close()
+}
+
+func TestVacuumKeepsNewestBackups(t *testing.T) {
+	cases := []struct {
+		keep int
+		want []string
+	}{
+		{2, []string{"data.aof.260102030404", "data.aof.260102030405"}},
+		{0, nil},
+		{-1, []string{"data.aof.260102030401", "data.aof.260102030402", "data.aof.260102030403", "data.aof.260102030404", "data.aof.260102030405"}},
+	}
+	for _, c := range cases {
+		fakeClock(t)
+		withBackups(t, c.keep)
+		dir := useAOF(t)
+		vacuumTimes(t, 5)
+		if got := backupNames(t, dir); !slices.Equal(got, c.want) {
+			t.Fatalf("keep %d: backups %v want %v", c.keep, got, c.want)
+		}
+		if got := readAOF(t, dir); got != "*\n{\"k\":4}\n" {
+			t.Fatalf("keep %d: AOF = %q", c.keep, got)
+		}
+	}
+}
+
+// Pruning touches only files named like a backup, and a file it cannot
+// remove does not stop the vacuum.
+func TestVacuumPruneLeavesOtherFiles(t *testing.T) {
+	fakeClock(t)
+	withBackups(t, 0)
+	dir := useAOF(t)
+	others := []string{"data.aof.bak", "data.aof.2601", "data.aof.2601020304000", "data.aof.26010203040x", "other.260102030400"}
+	for _, n := range others {
+		if err := os.WriteFile(filepath.Join(dir, n), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A backup name that cannot be removed: a directory with a file in it.
+	stuck := filepath.Join(dir, "data.aof.200101000000")
+	if err := os.MkdirAll(filepath.Join(stuck, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	vacuumTimes(t, 1)
+
+	for _, n := range append(others, "data.aof.200101000000") {
+		if _, err := os.Stat(filepath.Join(dir, n)); err != nil {
+			t.Fatalf("%s should still exist: %v", n, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data.aof.260102030401")); !os.IsNotExist(err) {
+		t.Fatalf("the new backup should have been pruned, stat err = %v", err)
+	}
+	if got := readAOF(t, dir); got != "*\n{\"k\":0}\n" {
+		t.Fatalf("AOF = %q", got)
+	}
+}
+
+func TestIsBackupName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"data.aof.260102030405":  true,
+		"data.aof.26010203040":   false,
+		"data.aof.2601020304050": false,
+		"data.aof.26010203040a":  false,
+		"data.aof.tmp":           false,
+		"data.aof":               false,
+		"xdata.aof.260102030405": false,
+	} {
+		if got := isBackupName("data.aof", name); got != want {
+			t.Fatalf("isBackupName(%q) = %v want %v", name, got, want)
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,8 +70,16 @@ func SetFsyncPolicy(p FsyncPolicy) {
 	fsyncPolicy = p
 }
 
+// SetBackups sets how many previous AOFs a vacuum keeps; a negative n keeps
+// them all. It must be called before Init.
+func SetBackups(n int) {
+	backups = n
+}
+
 var (
 	fsyncPolicy = FsyncEverysec
+	backups     = 3
+	now         = time.Now // names vacuum backups; tests replace it
 
 	dbfn string
 	db   *os.File
@@ -648,7 +657,7 @@ func doEraseAndDump() {
 
 	// Keep the old AOF as a backup. A backup from the same second is replaced,
 	// as the rename this used to be did.
-	backup := dbfn + "." + time.Now().Format("060102150405")
+	backup := dbfn + "." + now().Format(backupTimeLayout)
 	os.Remove(backup)
 	if err := os.Link(dbfn, backup); err != nil && !os.IsNotExist(err) {
 		log.Printf("failed to keep aof backup: %v", err)
@@ -657,10 +666,54 @@ func doEraseAndDump() {
 		log.Printf("failed to replace aof after vacuum: %v", err)
 	}
 	syncDir(filepath.Dir(dbfn))
+	pruneBackups()
 
 	if err := reopen(); err != nil {
 		log.Printf("failed to reopen db after vacuum: %v", err)
 	}
+}
+
+const backupTimeLayout = "060102150405"
+
+// pruneBackups removes the oldest vacuum backups beyond the number to keep.
+// Only files named like one, data.aof. and twelve digits, are touched.
+func pruneBackups() {
+	if backups < 0 {
+		return
+	}
+	dir, base := filepath.Dir(dbfn), filepath.Base(dbfn)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Printf("failed to list aof backups: %v", err)
+		return
+	}
+	var names []string
+	for _, e := range entries {
+		if isBackupName(base, e.Name()) {
+			names = append(names, e.Name())
+		}
+	}
+	// The timestamp sorts in time order.
+	sort.Strings(names)
+	for len(names) > backups {
+		if err := os.Remove(filepath.Join(dir, names[0])); err != nil {
+			log.Printf("failed to remove old aof backup: %v", err)
+		}
+		names = names[1:]
+	}
+}
+
+func isBackupName(base, name string) bool {
+	stamp, ok := strings.CutPrefix(name, base+".")
+	if !ok || len(stamp) != len(backupTimeLayout) {
+		return false
+	}
+	for i := 0; i < len(stamp); i++ {
+		if stamp[i] < '0' || stamp[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func writeSnapshotFile(path string) error {

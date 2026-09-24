@@ -58,3 +58,12 @@ func TestRaftFsync(t *testing.T) {
 		t.Fatalf("raft.fsync = %q", c.Raft.Fsync)
 	}
 }
+
+func TestBackups(t *testing.T) {
+	if c := load(t, ""); c.Backups != 3 {
+		t.Fatalf("default db.backups = %d want 3", c.Backups)
+	}
+	if c := load(t, "db:\n  backups: -1\n"); c.Backups != -1 {
+		t.Fatalf("db.backups = %d want -1", c.Backups)
+	}
+}

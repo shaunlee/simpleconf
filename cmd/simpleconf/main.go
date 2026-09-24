@@ -31,6 +31,7 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 	db.SetFsyncPolicy(policy)
+	db.SetBackups(cfg.Backups)
 
 	db.Init(cfg.DBDir)
 	defer db.Close(true)

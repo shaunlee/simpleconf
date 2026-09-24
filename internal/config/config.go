@@ -15,6 +15,7 @@ type Config struct {
 	TCPListen string
 	DBDir     string
 	Fsync     string
+	Backups   int
 
 	Raft cluster.Config
 
@@ -32,6 +33,7 @@ func Load() (*Config, error) {
 	v.SetConfigType("yaml")
 	v.SetDefault("listen", ":23456")
 	v.SetDefault("raft.forward", true)
+	v.SetDefault("db.backups", 3)
 	v.AutomaticEnv()
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -44,6 +46,7 @@ func Load() (*Config, error) {
 		TCPListen: first(v.GetString("tcp_listen"), v.GetString("tcp.listen")),
 		DBDir:     first(v.GetString("db_dir"), v.GetString("db.dir"), "/data"),
 		Fsync:     v.GetString("db.fsync"),
+		Backups:   v.GetInt("db.backups"),
 		Raft: cluster.Config{
 			Enabled:   v.GetBool("raft.enabled"),
 			Forward:   v.GetBool("raft.forward"),

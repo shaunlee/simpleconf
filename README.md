@@ -164,6 +164,7 @@ optional:
 db:
   dir: data           # default /data
   fsync: everysec     # always | everysec | no
+  backups: 3          # old append-only files kept after a vacuum
 listen: :23456        # HTTP
 tcp:
   listen: :23466      # TCP; off when unset
@@ -177,6 +178,7 @@ matching settings. `PEERS_LISTEN` is used only when the file sets no
 | --- | --- |
 | `db.dir` | data directory |
 | `db.fsync` | when to fsync the append-only file; see below |
+| `db.backups` | how many previous append-only files a vacuum keeps; `-1` keeps all |
 | `listen` | HTTP listen address |
 | `tcp.listen` | TCP listen address |
 | `raft.*` | see [Raft cluster](#raft-cluster) |
@@ -218,8 +220,9 @@ loss.
 
 A vacuum, and every clean shutdown, rewrites the file as one snapshot. The
 snapshot is written to a temporary file and renamed into place, and the
-previous file is kept alongside it with a timestamp suffix. These backups are
-not removed automatically.
+previous file is kept alongside it with a timestamp suffix. `db.backups` sets
+how many of these are kept, 3 by default: the oldest go first, `0` keeps none
+and `-1` keeps them all.
 
 ## Raft cluster
 
