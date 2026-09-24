@@ -6,7 +6,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 )
 
-const version = "v0.4.0-beta"
+const version = "v0.4.0"
 
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{
