@@ -160,3 +160,18 @@ writers   per write   writes/s     per write   writes/s
 With `everysec` one writer and twelve take about the same time: the disk is no
 longer the limit, Raft's own pipeline is. On macOS, where Go's `fsync` is
 `F_FULLFSYNC`, one writer under `always` takes about 4 ms per write.
+
+The apply channel is buffered (hashicorp/raft's `BatchApplyCh`), so writes that
+arrive together reach the leader loop together. Measured against the same code
+with it off, 10 runs each, alternating:
+
+```text
+                    off         on
+1 writer, always    429 µs      427 µs     no difference
+64, always          36.2 µs     29.2 µs    -19%
+64, everysec        26.2 µs     21.8 µs    -17%
+```
+
+A three-node cluster in Docker, written to from the host over TCP with 64
+connections, did about 8–9.5k writes/s either way; there the network between
+host and containers is the limit.

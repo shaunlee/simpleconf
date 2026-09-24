@@ -140,6 +140,12 @@ func Start(cfg Config) (*Manager, error) {
 	raftCfg := raft.DefaultConfig()
 	raftCfg.LocalID = raft.ServerID(cfg.NodeID)
 	raftCfg.LogLevel = "WARN"
+	// Buffer the apply channel so concurrent writes reach the leader loop
+	// together and share a log write. With 64 writers this cut a write by
+	// about a fifth. The cost is that Apply's timeout only bounds getting
+	// into the buffer, not being taken from it; waiting for the commit was
+	// never bounded.
+	raftCfg.BatchApplyCh = true
 
 	addr, err := net.ResolveTCPAddr("tcp", cfg.RaftAddr)
 	if err != nil {
