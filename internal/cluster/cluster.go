@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/hashicorp/raft"
@@ -91,8 +92,10 @@ func getDefault() *Manager {
 	return defaultManager
 }
 
+// AsNotLeader reports whether err is, or wraps, a *NotLeaderError.
 func AsNotLeader(err error) (*NotLeaderError, bool) {
-	nl, ok := err.(*NotLeaderError)
+	var nl *NotLeaderError
+	ok := errors.As(err, &nl)
 	return nl, ok
 }
 
