@@ -581,23 +581,69 @@ func reopen() error {
 	return nil
 }
 
+// doEraseAndDump rewrites the AOF as a single snapshot record. The snapshot is
+// written and fsynced to a temp file first and then renamed over the AOF, so a
+// crash or a failed write at any point leaves a complete AOF, old or new.
 func doEraseAndDump() {
+	tmp := dbfn + ".tmp"
+	if err := writeSnapshotFile(tmp); err != nil {
+		log.Printf("vacuum failed, keeping the current aof: %v", err)
+		os.Remove(tmp)
+		return
+	}
+
 	if db != nil {
-		db.Sync()
+		if err := db.Sync(); err != nil {
+			log.Printf("failed to fsync db before vacuum: %v", err)
+		}
 		db.Close()
 		db = nil
 	}
 
-	// Rename the old AOF for backup
-	os.Rename(dbfn, dbfn+"."+time.Now().Format("060102150405"))
+	// Keep the old AOF as a backup. A backup from the same second is replaced,
+	// as the rename this used to be did.
+	backup := dbfn + "." + time.Now().Format("060102150405")
+	os.Remove(backup)
+	if err := os.Link(dbfn, backup); err != nil && !os.IsNotExist(err) {
+		log.Printf("failed to keep aof backup: %v", err)
+	}
+	if err := os.Rename(tmp, dbfn); err != nil {
+		log.Printf("failed to replace aof after vacuum: %v", err)
+	}
+	syncDir(filepath.Dir(dbfn))
 
 	if err := reopen(); err != nil {
 		log.Printf("failed to reopen db after vacuum: %v", err)
+	}
+}
+
+func writeSnapshotFile(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(f, "*\n%s\n", snapshot()); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// syncDir makes a rename in dir durable.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		log.Printf("failed to open data dir for fsync: %v", err)
 		return
 	}
-
-	fmt.Fprintf(db, "*\n%s\n", snapshot())
-	db.Sync()
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		log.Printf("failed to fsync data dir: %v", err)
+	}
 }
 
 func Close(exit ...bool) {

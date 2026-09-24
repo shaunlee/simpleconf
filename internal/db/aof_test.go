@@ -130,3 +130,52 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// A vacuum that cannot write its snapshot must leave the AOF, and appends to
+// it, intact.
+func TestVacuumWriteFailureKeepsAOF(t *testing.T) {
+	dir := useAOF(t)
+	if err := Set("k", 1); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the temp file should go makes the snapshot write fail.
+	if err := os.Mkdir(filepath.Join(dir, "data.aof.tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	Vacuum()
+	if err := Set("after", 2); err != nil {
+		t.Fatal(err)
+	}
+	Close()
+
+	if got, want := readAOF(t, dir), "+k\n1\n+after\n2\n"; got != want {
+		t.Fatalf("AOF after a failed vacuum = %q want %q", got, want)
+	}
+	if backups, _ := filepath.Glob(filepath.Join(dir, "data.aof.[0-9]*")); len(backups) != 0 {
+		t.Fatalf("a failed vacuum should not rotate the AOF, got backups %v", backups)
+	}
+
+	resetConfig()
+	Init(dir)
+	defer Close()
+	if got, want := Get(""), `{"k":1,"after":2}`; got != want {
+		t.Fatalf("reloaded %s want %s", got, want)
+	}
+}
+
+func TestVacuumTwiceInOneSecond(t *testing.T) {
+	dir := useAOF(t)
+	for i := 0; i < 2; i++ {
+		if err := Set("k", i); err != nil {
+			t.Fatal(err)
+		}
+		Vacuum()
+	}
+	Close()
+	if got, want := readAOF(t, dir), "*\n{\"k\":1}\n"; got != want {
+		t.Fatalf("AOF = %q want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data.aof.tmp")); !os.IsNotExist(err) {
+		t.Fatalf("temp file left behind: %v", err)
+	}
+}
