@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/goccy/go-json"
@@ -66,6 +67,11 @@ func TestValueConversionErrors(t *testing.T) {
 	var je *JSONError
 	if err := Set("n", json.Number("abc")); !errors.As(err, &je) {
 		t.Fatalf("invalid json.Number error = %v, want *JSONError", err)
+	}
+	for _, v := range []any{math.NaN(), math.Inf(1), math.Inf(-1), float32(math.NaN()), float32(math.Inf(1))} {
+		if err := Set("n", v); !errors.As(err, &je) {
+			t.Fatalf("Set(%v) error = %v, want *JSONError", v, err)
+		}
 	}
 	if err := Set("c", make(chan int)); err == nil {
 		t.Fatal("an unencodable value should fail")

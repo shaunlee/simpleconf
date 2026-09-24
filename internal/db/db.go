@@ -10,6 +10,7 @@ import (
 	"github.com/tidwall/gjson"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -244,9 +245,9 @@ func valueToNode(v any) (any, error) {
 	case uint64:
 		return treeLeaf(strconv.FormatUint(v, 10)), nil
 	case float32:
-		return treeLeaf(string(strconv.AppendFloat(nil, float64(v), 'f', -1, 64))), nil
+		return floatNode(float64(v))
 	case float64:
-		return treeLeaf(string(strconv.AppendFloat(nil, v, 'f', -1, 64))), nil
+		return floatNode(v)
 	case json.Number:
 		if c, ok := canonicalNumberText(v.String()); ok {
 			return treeLeaf(c), nil
@@ -259,6 +260,15 @@ func valueToNode(v any) (any, error) {
 		}
 		return nodeFromRaw(raw), nil
 	}
+}
+
+// floatNode rejects NaN and ±Inf, which JSON cannot represent, as rawJSON
+// does when they are nested.
+func floatNode(f float64) (any, error) {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return nil, &JSONError{Err: fmt.Errorf("unsupported number %v", f)}
+	}
+	return treeLeaf(string(strconv.AppendFloat(nil, f, 'f', -1, 64))), nil
 }
 
 // nodeFromRaw stores a scalar's text as a leaf. Objects and arrays are parsed
