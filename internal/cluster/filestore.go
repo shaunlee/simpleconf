@@ -209,6 +209,11 @@ func (s *fileStore) appendWALLocked(rec walRecord) error {
 		if err != nil {
 			return err
 		}
+		// The file may have just been created.
+		if err := syncDir(filepath.Dir(s.walPath)); err != nil {
+			f.Close()
+			return err
+		}
 		s.walFile = f
 	}
 	b, err := json.Marshal(rec)
@@ -216,6 +221,11 @@ func (s *fileStore) appendWALLocked(rec walRecord) error {
 		return err
 	}
 	if _, err := s.walFile.Write(append(b, '\n')); err != nil {
+		return err
+	}
+	// Raft treats a stored log entry, term or vote as durable once this
+	// returns: a node that forgets its vote can vote twice in one term.
+	if err := s.walFile.Sync(); err != nil {
 		return err
 	}
 	s.walOps++
@@ -238,6 +248,9 @@ func (s *fileStore) compactLocked() error {
 		return err
 	}
 	if err := os.Rename(tmp, s.walPath); err != nil {
+		return err
+	}
+	if err := syncDir(s.dir); err != nil {
 		return err
 	}
 	s.walOps = 0
@@ -272,16 +285,43 @@ func (s *fileStore) persistSnapshotLocked() error {
 	return atomicWriteJSON(s.snapshotPath, payload)
 }
 
+// atomicWriteJSON replaces path with v's JSON. The data is fsynced before the
+// rename and the rename before returning, so the WAL can be truncated after it.
 func atomicWriteJSON(path string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// syncDir makes renames and file creations in dir durable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 func (s *fileStore) recomputeBoundsLocked() {

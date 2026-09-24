@@ -12,7 +12,7 @@ import (
 	"github.com/shaunlee/simpleconf/internal/db"
 )
 
-func freeAddr(t *testing.T) string {
+func freeAddr(t testing.TB) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -40,7 +40,7 @@ func startSingle(t *testing.T, dir string) *Manager {
 	return m
 }
 
-func waitLeader(t *testing.T, m *Manager) {
+func waitLeader(t testing.TB, m *Manager) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for m.raft.State() != raft.Leader {
