@@ -99,7 +99,7 @@ func TestForwardOverRaftPort(t *testing.T) {
 	}
 
 	// The leader closes the pooled connection; the next write dials again.
-	leader.layer.closeForwardConns()
+	leader.layer.CloseHandled()
 	if err := follower.apply(command{Op: "set", Key: "again", Value: 1}); err != nil {
 		t.Fatalf("set after the leader closed the connection: %v", err)
 	}

@@ -230,7 +230,7 @@ func Start(cfg Config) (*Manager, error) {
 	m.idToHTTP = idToHTTP
 	m.raftToHTTP = raftToHTTP
 	m.layer = layer
-	layer.setForward(m.serveForward)
+	layer.SetHandler(m.serveForward)
 	fsync := "always"
 	if lazySync {
 		fsync = "everysec"

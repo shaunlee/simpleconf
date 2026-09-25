@@ -2,17 +2,16 @@ package cluster
 
 import (
 	"bufio"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/hashicorp/raft"
+	"github.com/shaunlee/simpleconf/internal/wire"
 )
 
 // Node-to-node traffic shares the Raft port. hashicorp/raft opens each of its
@@ -36,19 +35,11 @@ const maxForwardFrame = 64 << 20
 // unknown RPC type and closes the connection.
 var errForwardUnsupported = errors.New("leader does not accept forwarded writes over the raft port")
 
-// muxLayer is the StreamLayer given to the Raft transport. It accepts every
-// connection on the Raft port, hands forwarding connections to the forward
-// handler and queues the rest for Raft.
+// muxLayer is the StreamLayer given to the Raft transport: the Raft port,
+// split by first byte between Raft and forwarded writes.
 type muxLayer struct {
-	ln        net.Listener
+	*wire.Mux
 	advertise net.Addr
-	raftConns chan net.Conn
-
-	mu      sync.Mutex
-	forward func(net.Conn) // nil until the node can serve forwarded writes
-	conns   map[net.Conn]struct{}
-	closed  bool
-	done    chan struct{}
 }
 
 func newMuxLayer(bind string, advertise *net.TCPAddr) (*muxLayer, error) {
@@ -59,115 +50,8 @@ func newMuxLayer(bind string, advertise *net.TCPAddr) (*muxLayer, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := &muxLayer{
-		ln:        ln,
-		advertise: advertise,
-		raftConns: make(chan net.Conn),
-		conns:     map[net.Conn]struct{}{},
-		done:      make(chan struct{}),
-	}
-	go l.serve()
-	return l, nil
-}
-
-func (l *muxLayer) serve() {
-	for {
-		c, err := l.ln.Accept()
-		if err != nil {
-			select {
-			case <-l.done:
-				return
-			default:
-			}
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
-			log.Printf("raft port: accept: %v", err)
-			return
-		}
-		go l.route(c)
-	}
-}
-
-// route reads a connection's first byte to tell whose it is. Raft writes its
-// RPC type as soon as it connects, so the deadline only drops connections
-// that never say anything.
-func (l *muxLayer) route(c net.Conn) {
-	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
-	br := bufio.NewReader(c)
-	first, err := br.Peek(1)
-	if err != nil {
-		_ = c.Close()
-		return
-	}
-	_ = c.SetReadDeadline(time.Time{})
-	conn := &bufferedConn{Conn: c, r: br}
-
-	if first[0] != forwardByte {
-		select {
-		case l.raftConns <- conn:
-		case <-l.done:
-			_ = c.Close()
-		}
-		return
-	}
-	_, _ = br.Discard(1)
-	l.mu.Lock()
-	handler := l.forward
-	if handler == nil || l.closed {
-		l.mu.Unlock()
-		_ = c.Close()
-		return
-	}
-	l.conns[c] = struct{}{}
-	l.mu.Unlock()
-	defer func() {
-		l.mu.Lock()
-		delete(l.conns, c)
-		l.mu.Unlock()
-		_ = c.Close()
-	}()
-	handler(conn)
-}
-
-func (l *muxLayer) setForward(fn func(net.Conn)) {
-	l.mu.Lock()
-	l.forward = fn
-	l.mu.Unlock()
-}
-
-func (l *muxLayer) Accept() (net.Conn, error) {
-	select {
-	case c := <-l.raftConns:
-		return c, nil
-	case <-l.done:
-		return nil, net.ErrClosed
-	}
-}
-
-// Close stops accepting and closes the forwarding connections being served.
-func (l *muxLayer) Close() error {
-	l.mu.Lock()
-	if l.closed {
-		l.mu.Unlock()
-		return nil
-	}
-	l.closed = true
-	close(l.done)
-	l.mu.Unlock()
-	l.closeForwardConns()
-	return l.ln.Close()
-}
-
-// closeForwardConns closes the forwarding connections being served.
-func (l *muxLayer) closeForwardConns() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for c := range l.conns {
-		_ = c.Close()
-	}
+	mux := wire.NewMux(ln, func(first byte) bool { return first == forwardByte })
+	return &muxLayer{Mux: mux, advertise: advertise}, nil
 }
 
 func (l *muxLayer) Addr() net.Addr { return l.advertise }
@@ -176,40 +60,10 @@ func (l *muxLayer) Dial(addr raft.ServerAddress, timeout time.Duration) (net.Con
 	return net.DialTimeout("tcp", string(addr), timeout)
 }
 
-// bufferedConn reads through the reader that peeked at the first byte.
-type bufferedConn struct {
-	net.Conn
-	r *bufio.Reader
-}
-
-func (c *bufferedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
-
 // A frame is a uvarint length followed by that many bytes. A request is one
 // frame holding the command, encoded as it is in the Raft log. A reply is a
 // status byte and one frame: empty for forwardOK, the leader's HTTP address
 // for forwardNotLeader, the error text for forwardError.
-
-func writeFrame(w *bufio.Writer, b []byte) error {
-	var n [binary.MaxVarintLen64]byte
-	if _, err := w.Write(n[:binary.PutUvarint(n[:], uint64(len(b)))]); err != nil {
-		return err
-	}
-	_, err := w.Write(b)
-	return err
-}
-
-func readFrame(r *bufio.Reader) ([]byte, error) {
-	n, err := binary.ReadUvarint(r)
-	if err != nil {
-		return nil, err
-	}
-	if n > maxForwardFrame {
-		return nil, fmt.Errorf("forwarded frame of %d bytes is too large", n)
-	}
-	b := make([]byte, n)
-	_, err = io.ReadFull(r, b)
-	return b, err
-}
 
 // serveForward answers forwarded writes on one connection until it closes.
 // A node that is not the leader says so rather than passing the write on
@@ -217,8 +71,11 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 func (m *Manager) serveForward(c net.Conn) {
 	r := bufio.NewReader(c)
 	w := bufio.NewWriter(c)
+	if b, err := r.ReadByte(); err != nil || b != forwardByte {
+		return
+	}
 	for {
-		req, err := readFrame(r)
+		req, err := wire.ReadFrame(r, maxForwardFrame)
 		if err != nil {
 			return
 		}
@@ -233,7 +90,7 @@ func (m *Manager) serveForward(c net.Conn) {
 		if err := w.WriteByte(status); err != nil {
 			return
 		}
-		if err := writeFrame(w, []byte(msg)); err != nil {
+		if err := wire.WriteFrame(w, []byte(msg)); err != nil {
 			return
 		}
 		if err := w.Flush(); err != nil {
@@ -383,7 +240,7 @@ func (m *Manager) forwardTCP(addr string, req []byte) error {
 func roundTrip(fc *forwardConn, req []byte) (sent bool, err error) {
 	_ = fc.c.SetDeadline(time.Now().Add(applyTimeout))
 	defer func() { _ = fc.c.SetDeadline(time.Time{}) }()
-	if err := writeFrame(fc.w, req); err != nil {
+	if err := wire.WriteFrame(fc.w, req); err != nil {
 		return false, err
 	}
 	if err := fc.w.Flush(); err != nil {
@@ -393,7 +250,7 @@ func roundTrip(fc *forwardConn, req []byte) (sent bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	msg, err := readFrame(fc.r)
+	msg, err := wire.ReadFrame(fc.r, maxForwardFrame)
 	if err != nil {
 		return false, err
 	}
