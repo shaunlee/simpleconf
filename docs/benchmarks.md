@@ -147,18 +147,20 @@ BenchmarkTcpCloneParallel-12    	 1747497	      1375 ns/op	      81 B/op	       
 cluster, in a Linux container on the same machine. Every write is a Raft log
 entry. Under `raft.fsync: always` it is fsynced before it is applied, and Raft
 stores entries in batches, so concurrent writers share an fsync. Under
-`everysec` the fsync happens in the background once a second:
+`everysec` the fsync happens in the background once a second. Medians of 5
+runs, measured at v0.8.0:
 
 ```text
           always                   everysec
 writers   per write   writes/s     per write   writes/s
-1         590 µs      ~1.7k        40 µs       ~25k
-12        146 µs      ~6.8k        39 µs       ~26k
-64         46 µs      ~22k         23 µs       ~43k
+1         597 µs      ~1.7k        31 µs       ~32k
+12        140 µs      ~7.1k        45 µs       ~22k
+64         36 µs      ~27k         18 µs       ~56k
 ```
 
-With `everysec` one writer and twelve take about the same time: the disk is no
-longer the limit, Raft's own pipeline is. On macOS, where Go's `fsync` is
+With `everysec` the disk is no longer the limit, Raft's own pipeline is, and
+twelve writers get less through than one. The runs on this VM disk vary by up
+to 2x from its fsync spikes, so take single figures as approximate. On macOS, where Go's `fsync` is
 `F_FULLFSYNC`, one writer under `always` takes about 4 ms per write.
 
 The apply channel is buffered (hashicorp/raft's `BatchApplyCh`), so writes that
@@ -175,3 +177,24 @@ with it off, 10 runs each, alternating:
 A three-node cluster in Docker, written to from the host over TCP with 64
 connections, did about 8–9.5k writes/s either way; there the network between
 host and containers is the limit.
+
+## Peers mode
+
+How fast one node's queued writes reach one peer: 20,000 to 200,000 small
+`PUT`s are queued, and the clock stops when the peer has acknowledged all of
+them. The receiving node runs `db.fsync: everysec`, so it does not fsync each
+write. v0.7 sends one HTTP request per write and waits for the reply; v0.8
+sends up to 256 writes in one round trip. Medians of 3 to 5 runs; the middle
+column is how long v0.7 takes per write, one round trip plus handling it:
+
+```text
+                                        v0.7 per write   v0.7       v0.8
+loopback, Linux container               0.021 ms         ~47k/s     ~200k/s
+wired LAN, Mac to a Linux machine       0.19 ms          ~5.4k/s    ~186k/s
+same, the Linux machine on Wi-Fi        1.6 ms           ~630/s     ~110k/s
+```
+
+v0.7 manages one write per round trip, so it falls with the network's latency;
+v0.8 spreads a round trip over a batch and stays near what the sender and the
+receiving node can process. Under `db.fsync: always` the receiving node
+fsyncs every write, and that, not the protocol, limits both versions.

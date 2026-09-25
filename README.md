@@ -346,7 +346,7 @@ be elected. Choose `everysec` only when the nodes do not share a power supply.
 
 Concurrent writes share an fsync, so under `always` a single client writing
 one key at a time sees the full cost of the disk. On one test machine a single
-writer took 590 µs per write under `always` and 40 µs under `everysec`; see
+writer took about 600 µs per write under `always` and 31 µs under `everysec`; see
 [docs/benchmarks.md](docs/benchmarks.md#raft).
 
 ## Peers mode
