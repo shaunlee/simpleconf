@@ -332,3 +332,49 @@ func TestWALPathIgnoresScheme(t *testing.T) {
 		t.Fatalf("%s != %s", a, b)
 	}
 }
+
+// A peer under db.fsync always waits for an fsync per write. A batch that
+// takes longer than the sender waits for its reply must still make
+// progress, not be sent again whole forever.
+func TestSlowPeerStillDrains(t *testing.T) {
+	resetSyncState(t)
+	useDB(t)
+	fastRetry(t)
+	origTimeout, origBudget := batchTimeout, applyBudget
+	batchTimeout, applyBudget = 200*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { batchTimeout, applyBudget = origTimeout, origBudget })
+	swapApplyOp(t, func(o op) error { time.Sleep(5 * time.Millisecond); return nil })
+	addr := startPeer(t, false)
+	w := workerFor(addr)
+	for range 100 { // 500 ms of fsyncs, over twice the wait
+		if _, err := w.enqueue(syncOp{Method: "DELETE", Path: "/db/k"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !eventually(t, 5*time.Second, func() bool { _, ok := w.peek(); return !ok }) {
+		t.Fatalf("%d ops still queued", len(pendingPaths(w)))
+	}
+}
+
+// A panic while applying a batch is logged and the connection closed; the
+// node stays up and the sender sends the batch again.
+func TestServeTCPRecoversPanic(t *testing.T) {
+	resetSyncState(t)
+	useDB(t)
+	fastRetry(t)
+	var calls atomic.Int32
+	swapApplyOp(t, func(o op) error {
+		if calls.Add(1) == 1 {
+			panic("boom")
+		}
+		return nil
+	})
+	w := workerFor(startPeer(t, false))
+	if _, err := w.enqueue(syncOp{Method: "DELETE", Path: "/db/k"}); err != nil {
+		t.Fatal(err)
+	}
+	drained(t, w)
+	if calls.Load() != 2 {
+		t.Fatalf("applied %d times, want the panic and one retry", calls.Load())
+	}
+}

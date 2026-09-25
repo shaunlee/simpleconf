@@ -363,7 +363,7 @@ peers:
 ```
 
 Addresses may also be written `http://10.0.0.2:23457`, as configs from before
-v0.8 do.
+v0.8 do. A node still on v0.7 or earlier needs that form.
 
 - On start, a node with an empty document, such as a new node or one whose
   data directory was replaced, copies the document from the first peer that

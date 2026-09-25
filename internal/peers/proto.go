@@ -40,8 +40,17 @@ const (
 	maxBatchBytes = 1 << 20
 	maxValue      = 64 << 20 // one key, value or message
 	maxDocument   = 1 << 30  // Restore
-	batchTimeout  = 5 * time.Second
 	helloTimeout  = requestTimeout
+)
+
+// batchTimeout is how long a sender waits for a batch's reply, and
+// applyBudget how long a peer spends applying one before it replies with
+// what it has done. Under db.fsync always each write waits for its own
+// fsync, and 256 of them on a slow disk would outlast the sender, which
+// would then send the whole batch again, forever. Tests shorten both.
+var (
+	batchTimeout = 5 * time.Second
+	applyBudget  = time.Second
 )
 
 // errPeerUnsupported means the peer's port answered hello with something
@@ -163,7 +172,11 @@ func readCount(r *bufio.Reader, max int) (int, error) {
 // it are sent again; any other error drops that one write.
 func applyBatch(ops []op) batchResult {
 	res := batchResult{rejected: map[int]string{}}
+	start := time.Now()
 	for i, o := range ops {
+		if i > 0 && time.Since(start) > applyBudget {
+			return res // the sender sends the rest next
+		}
 		err := applyOp(o)
 		if errors.Is(err, db.ErrWritesRefused) {
 			res.stopped = err.Error()
@@ -194,6 +207,13 @@ var applyOp = func(o op) error {
 
 // serveTCP answers one connection of the peers protocol until it closes.
 func serveTCP(c net.Conn) {
+	// A panic in the db must not take the node down, as it did not over
+	// HTTP. The sender gets no reply and sends the batch again.
+	defer func() {
+		if v := recover(); v != nil {
+			log.Printf("peers: %s: panic: %v", c.RemoteAddr(), v)
+		}
+	}()
 	r := bufio.NewReader(c)
 	w := bufio.NewWriter(c)
 	got := make([]byte, len(hello))
