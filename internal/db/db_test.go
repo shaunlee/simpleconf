@@ -20,7 +20,7 @@ func resetConfig() {
 }
 
 func TestSetGetDelClone(t *testing.T) {
-	resetConfig()
+	useAOF(t) // Clone writes to the AOF, which needs a writer
 
 	if err := setonly("bench", "mark"); err != nil {
 		t.Fatalf("setonly failed: %v", err)

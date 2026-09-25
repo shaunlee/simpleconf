@@ -56,10 +56,14 @@ func abandonWriter(t *testing.T) {
 	t.Cleanup(func() { wg = sync.WaitGroup{} })
 }
 
+// waitExit returns the message the writer exited with, once it has returned.
+// The real fatalf never returns; this one does, and a Close made before the
+// writer is gone would queue a close for it that the next writer would take.
 func (d *failingDisk) waitExit(t *testing.T) string {
 	t.Helper()
 	select {
 	case msg := <-d.exits:
+		<-persistExit
 		return msg
 	case <-time.After(2 * time.Second):
 		t.Fatal("the writer did not exit")
@@ -102,9 +106,9 @@ func TestEverysecWriteFailureRefusesThenRecovers(t *testing.T) {
 	if err := Clone("a", "z"); !errors.Is(err, ErrWritesRefused) {
 		t.Fatalf("Clone while refused = %v", err)
 	}
-	if got := readAOF(t, dir); got != "+a\n1\n" {
-		t.Fatalf("partial write left in the file: %q", got)
-	}
+	// The writer retries every tick, so the file can hold a retry's partial
+	// record for a moment before it is cut off again.
+	eventually(t, "the partial write is cut off", func() bool { return readAOF(t, dir) == "+a\n1\n" })
 	if Get("a") != "1" || Get("b") != "2" {
 		t.Fatalf("reads while refused: %s", Get(""))
 	}
@@ -188,7 +192,13 @@ func TestFsyncFailureExits(t *testing.T) {
 		abandonWriter(t)
 		useAOF(t)
 		disk.syncs.Store(true)
-		go Set("k", 1) // under always it waits forever
+		// The writer must take this record before it exits; a record sent
+		// after that would stay queued for the next test's writer.
+		if policy == FsyncAlways {
+			go Set("k", 1) // waits forever for an acknowledgement
+		} else if err := Set("k", 1); err != nil {
+			t.Fatal(err)
+		}
 		if msg := disk.waitExit(t); msg == "" {
 			t.Fatalf("policy %d: empty exit message", policy)
 		}

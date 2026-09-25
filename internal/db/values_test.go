@@ -11,6 +11,11 @@ import (
 // useAOF gives one test a fresh document and AOF directory.
 func useAOF(t *testing.T) string {
 	t.Helper()
+	// The queue outlives the writer. A record left in it would be written by
+	// this test's writer, and its acknowledgement counted against this test.
+	if n := len(persists); n > 0 {
+		t.Fatalf("%d AOF records queued while no writer ran, by an earlier test", n)
+	}
 	resetConfig()
 	dir := t.TempDir()
 	Init(dir)
