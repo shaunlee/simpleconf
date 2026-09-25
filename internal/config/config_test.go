@@ -3,7 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/shaunlee/simpleconf/internal/cluster"
 )
 
 func load(t *testing.T, yml string) *Config {
@@ -44,9 +47,13 @@ func TestEnvOverridesFile(t *testing.T) {
 }
 
 func TestRaftPeers(t *testing.T) {
-	c := load(t, "raft:\n  peers:\n    - \"n1, 127.0.0.1:1, 127.0.0.1:2\"\n    - bad\n")
-	if len(c.Raft.Peers) != 1 || c.Raft.Peers[0].ID != "n1" || c.Raft.Peers[0].HTTPAddr != "127.0.0.1:2" {
-		t.Fatalf("got %+v", c.Raft.Peers)
+	c := load(t, "raft:\n  peers:\n    - \"n1, 127.0.0.1:1, 127.0.0.1:2\"\n    - n2,127.0.0.1:3\n    - bad\n")
+	want := []cluster.Peer{
+		{ID: "n1", RaftAddr: "127.0.0.1:1", HTTPAddr: "127.0.0.1:2"},
+		{ID: "n2", RaftAddr: "127.0.0.1:3"}, // the HTTP address is optional
+	}
+	if !reflect.DeepEqual(c.Raft.Peers, want) {
+		t.Fatalf("got %+v want %+v", c.Raft.Peers, want)
 	}
 }
 

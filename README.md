@@ -246,7 +246,8 @@ and `-1` keeps them all.
 ## Raft cluster
 
 Each node needs its own `raft.node_id`, `raft.listen` and data directory, and
-every node lists all of them in `raft.peers` as `id,raft_addr,http_addr`. Set
+every node lists all of them in `raft.peers` as `id,raft_addr,http_addr`; the
+HTTP address is optional. Set
 `raft.bootstrap: true` on one node, for the first start of the cluster only.
 Three nodes on 10.0.0.1–3, as configured on the first:
 
@@ -258,7 +259,7 @@ raft:
   enabled: true
   node_id: node-1
   listen: 10.0.0.1:7001               # an address the other nodes can reach, not 0.0.0.0
-  http_addr: http://10.0.0.1:23456    # where other nodes send forwarded writes
+  http_addr: http://10.0.0.1:23456    # told to clients as the leader's address
   bootstrap: true
   fsync: always                       # or everysec; see below
   peers:
@@ -323,9 +324,10 @@ sleep 1
 curl localhost:23453/db/app          # {"name":"demo"}
 ```
 
-Writes are committed through the leader. A follower passes a write on to the
-leader's HTTP address by default; with `raft.forward: false` it refuses the
-write and names the leader instead. Reads are answered by the node that
+Writes are committed through the leader. Nodes talk to each other only over
+the Raft port: a follower passes a write on to the leader there, and the HTTP
+and TCP ports are for clients. With `raft.forward: false` a follower refuses
+the write instead and names the leader's `http_addr`. Reads are answered by the node that
 receives them, so a follower can briefly return a value the leader has already
 replaced.
 

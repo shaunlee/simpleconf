@@ -91,6 +91,9 @@ type Manager struct {
 	httpAddr   string
 	idToHTTP   map[string]string
 	raftToHTTP map[string]string
+
+	layer *muxLayer   // the Raft port, shared with forwarded writes
+	fwd   forwardPool // connections to the leader's Raft port
 }
 
 var (
@@ -156,22 +159,27 @@ func Start(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	transport, err := raft.NewTCPTransport(cfg.RaftAddr, addr, 3, 10*time.Second, os.Stderr)
+	layer, err := newMuxLayer(cfg.RaftAddr, addr)
 	if err != nil {
 		return nil, err
 	}
+	transport := raft.NewNetworkTransport(layer, 3, 10*time.Second, os.Stderr)
 
 	store, err := newFileStore(cfg.Dir)
 	if err != nil {
+		_ = transport.Close()
 		return nil, err
 	}
 	snapshots, err := raft.NewFileSnapshotStore(cfg.Dir, 2, os.Stderr)
 	if err != nil {
+		_ = transport.Close()
+		_ = store.Close()
 		return nil, err
 	}
 
 	r, err := raft.NewRaft(raftCfg, &fsm{}, store, store, snapshots, transport)
 	if err != nil {
+		_ = transport.Close()
 		_ = store.Close()
 		return nil, err
 	}
@@ -221,6 +229,8 @@ func Start(cfg Config) (*Manager, error) {
 	m.httpAddr = normalizeHTTPAddr(cfg.HTTPAddr)
 	m.idToHTTP = idToHTTP
 	m.raftToHTTP = raftToHTTP
+	m.layer = layer
+	layer.setForward(m.serveForward)
 	fsync := "always"
 	if lazySync {
 		fsync = "everysec"
@@ -233,7 +243,8 @@ func (m *Manager) Shutdown() {
 	if !m.enabled || m.raft == nil {
 		return
 	}
-	_ = m.raft.Shutdown().Error()
+	_ = m.raft.Shutdown().Error() // also closes the transport and the Raft port
+	m.fwd.close()
 	if err := m.store.Close(); err != nil {
 		log.Printf("raft wal: close: %v", err)
 	}
@@ -403,19 +414,39 @@ func (m *Manager) apply(c command) error {
 		notifyLocalWrite(c)
 		return nil
 	}
-	if m.raft.State() != raft.Leader {
-		leader := m.leaderHTTPAddr()
-		if !m.forward || len(leader) == 0 {
-			return &NotLeaderError{LeaderHTTPAddr: leader}
-		}
-		return m.forwardToLeader(c, leader)
-	}
 	b, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
+	if m.raft.State() != raft.Leader {
+		if !m.forward {
+			return &NotLeaderError{LeaderHTTPAddr: m.leaderHTTPAddr()}
+		}
+		return m.forwardToLeader(c, b)
+	}
 	f := m.raft.Apply(b, applyTimeout)
 	return f.Error()
+}
+
+// forwardToLeader passes a write to the leader over its Raft port. A leader
+// running v0.6 or earlier drops that connection, and then the write goes to
+// its HTTP address, when one is configured, as it did before.
+func (m *Manager) forwardToLeader(c command, b []byte) error {
+	leader, _ := m.raft.LeaderWithID()
+	if len(leader) == 0 {
+		return &NotLeaderError{}
+	}
+	return m.forwardTo(c, b, string(leader), m.leaderHTTPAddr)
+}
+
+func (m *Manager) forwardTo(c command, b []byte, raftAddr string, httpAddr func() string) error {
+	err := m.forwardTCP(raftAddr, b)
+	if errors.Is(err, errForwardUnsupported) {
+		if h := httpAddr(); len(h) > 0 {
+			return m.forwardHTTP(c, h)
+		}
+	}
+	return err
 }
 
 func (m *Manager) leaderHTTPAddr() string {
@@ -438,7 +469,9 @@ func (m *Manager) leaderHTTPAddr() string {
 	return m.raftToHTTP[string(addr)]
 }
 
-func (m *Manager) forwardToLeader(c command, leader string) error {
+// forwardHTTP passes a write to the leader's HTTP API, for leaders that
+// predate forwarding over the Raft port.
+func (m *Manager) forwardHTTP(c command, leader string) error {
 	var (
 		method string
 		path   string

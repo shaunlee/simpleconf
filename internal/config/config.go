@@ -79,16 +79,21 @@ func parseRaftPeers(raw []string) []cluster.Peer {
 		if len(row) == 0 {
 			continue
 		}
+		// The HTTP address is only told to clients as the leader's; writes
+		// are forwarded over the Raft port.
 		parts := strings.Split(row, ",")
-		if len(parts) < 3 {
-			log.Printf("ignored invalid raft peer row %q, expected id,raft_addr,http_addr", row)
+		if len(parts) < 2 {
+			log.Printf("ignored invalid raft peer row %q, expected id,raft_addr[,http_addr]", row)
 			continue
 		}
-		peers = append(peers, cluster.Peer{
+		p := cluster.Peer{
 			ID:       strings.TrimSpace(parts[0]),
 			RaftAddr: strings.TrimSpace(parts[1]),
-			HTTPAddr: strings.TrimSpace(parts[2]),
-		})
+		}
+		if len(parts) > 2 {
+			p.HTTPAddr = strings.TrimSpace(parts[2])
+		}
+		peers = append(peers, p)
 	}
 	return peers
 }

@@ -9,7 +9,7 @@
 
 - When `raft.enabled=true`, nodes form a Raft cluster.
 - Leader applies commands through Raft log replication.
-- Followers optionally forward write requests to leader when `raft.forward=true`.
+- Followers optionally forward write requests to leader when `raft.forward=true`. Node-to-node traffic uses only the Raft port: a connection that opens with the byte `F` carries forwarded writes (`internal/cluster/forward.go`), any other is hashicorp/raft's. A leader from v0.6 or earlier closes such a connection, and the follower then falls back to the leader's HTTP address if one is configured.
 
 ## Non-Raft mode
 
