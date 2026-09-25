@@ -13,7 +13,8 @@
 
 ## Non-Raft mode
 
-- When `raft.enabled=false`, the service can use legacy `peers` sync behavior.
+- When `raft.enabled=false`, the service can use legacy `peers` sync behavior. Queued writes go to each peer in batches over the peers protocol (`internal/peers/proto.go`), on the peers port: a connection that opens with `SCP1\r\n` speaks it, any other is HTTP, kept for peers from v0.7 and earlier. A sender whose `SCP1\r\n` gets an HTTP reply uses HTTP with that peer for 30 seconds before trying again.
+- `internal/wire` holds what both node-to-node protocols share: length-prefixed frames and the listener that splits a port by first byte.
 
 ## Durability
 

@@ -89,7 +89,15 @@ type workerState struct {
 
 	syncMu sync.Mutex    // one fsync at a time; later callers share the next
 	synced atomic.Uint64 // highest seq known to be on disk
+
+	// Used by run alone.
+	conn      *peerConn // nil until dialled, and after an error
+	httpUntil time.Time // until then the peer is sent HTTP
 }
+
+// retryPeersProtocol is how long a worker sends HTTP to a peer that did not
+// answer hello, before trying the peers protocol again.
+const retryPeersProtocol = 30 * time.Second
 
 var (
 	httpClient = &http.Client{
@@ -139,12 +147,8 @@ func Restore(peerAddrs []string) {
 	}
 
 	for _, addr := range peerAddrs {
-		url := addr + "/db"
-		log.Println("trying to restore from", url)
-		body, err := doRequest(syncOp{
-			Method: http.MethodGet,
-			Path:   "/db",
-		}, addr)
+		log.Println("trying to restore from", addr)
+		body, err := fetchDocument(addr)
 		if err != nil {
 			log.Println("failed to restore", err)
 			continue
@@ -312,7 +316,13 @@ func workerFor(addr string) *workerState {
 	return w
 }
 
+// walPathForAddr names a peer's queue file after its address. The name is
+// taken from the http:// form, which every address had before v0.8, so a
+// queue left by an older node is found whichever way the address is written.
 func walPathForAddr(addr string) string {
+	if !strings.Contains(addr, "://") {
+		addr = "http://" + addr
+	}
 	sum := sha1.Sum([]byte(addr))
 	name := hex.EncodeToString(sum[:]) + ".jsonl"
 	return filepath.Join(currentWALDir(), name)
@@ -387,7 +397,7 @@ func (w *workerState) enqueue(op syncOp) (uint64, error) {
 	w.pending = append(w.pending, op)
 	w.seq++
 	w.signal()
-	if err := w.appendLocked(rec); err != nil {
+	if err := w.appendLocked(rec, 1); err != nil {
 		return 0, err
 	}
 	return w.seq, nil
@@ -400,40 +410,101 @@ func (w *workerState) signal() {
 	}
 }
 
-// run sends queued ops to the peer in order. An op the peer cannot be reached
-// for is retried until it goes through, so a peer that is down for a while
-// catches up when it returns. An op the peer rejects with a 4xx is dropped,
-// since sending it again would not change the answer.
+// run sends queued ops to the peer in order, in batches over the peers
+// protocol, or one at a time over HTTP to a peer from v0.7 or earlier. An
+// op the peer cannot take yet is retried until it goes through, so a peer
+// that is down for a while catches up when it returns. An op the peer
+// rejects is dropped, since sending it again would not change the answer.
 func (w *workerState) run() {
 	for range w.ch {
 		for {
-			op, ok := w.peek()
-			if !ok {
+			batch := w.peekBatch()
+			if len(batch) == 0 {
 				break
 			}
-
-			for attempt := 0; ; attempt++ {
-				_, err := doRequest(op, w.addr)
-				if err == nil {
-					break
-				}
-				if isRejected(err) {
-					log.Printf("dropping sync op rejected by %s: %s %s: %v", w.addr, op.Method, op.Path, err)
-					break
-				}
-				if attempt+1 == warnAfter {
-					log.Printf("peer %s unreachable, still retrying %s %s: %v", w.addr, op.Method, op.Path, err)
-				}
-				time.Sleep(backoff(attempt))
-			}
-
-			if err := w.ack(); err != nil {
+			n := w.deliver(batch)
+			if err := w.ackN(n); err != nil {
 				log.Println("failed to ack wal", w.addr, err)
 				time.Sleep(backoff(0))
 				break
 			}
 		}
 	}
+}
+
+// deliver sends the start of batch until the peer has taken at least one
+// op, and returns how many it took, rejected ones included.
+func (w *workerState) deliver(batch []syncOp) int {
+	for attempt := 0; ; attempt++ {
+		n, err := w.send(batch)
+		if n > 0 {
+			return n
+		}
+		if attempt+1 == warnAfter {
+			log.Printf("peer %s unreachable, still retrying %s %s: %v", w.addr, batch[0].Method, batch[0].Path, err)
+		}
+		time.Sleep(backoff(attempt))
+	}
+}
+
+// send makes one attempt at batch and reports how many ops the peer took.
+func (w *workerState) send(batch []syncOp) (int, error) {
+	if time.Now().Before(w.httpUntil) {
+		return w.sendHTTP(batch[0])
+	}
+	ops := make([]op, 0, len(batch))
+	for _, s := range batch {
+		o, err := toOp(s)
+		if err != nil {
+			if len(ops) == 0 {
+				log.Printf("dropping sync op for %s: %v", w.addr, err)
+				return 1, nil
+			}
+			break // send the ops before it; it comes first next time
+		}
+		ops = append(ops, o)
+	}
+	if w.conn == nil {
+		pc, err := dialPeer(w.addr)
+		if errors.Is(err, errPeerUnsupported) {
+			// Back to HTTP for a while; the peer may be upgraded later.
+			w.httpUntil = time.Now().Add(retryPeersProtocol)
+			return w.sendHTTP(batch[0])
+		}
+		if err != nil {
+			return 0, err
+		}
+		w.conn = pc
+	}
+	res, err := w.conn.sendBatch(ops)
+	if err != nil {
+		// The reply is lost, not necessarily the ops. Sending the whole
+		// batch again replays them in order, so the peer ends the same.
+		_ = w.conn.c.Close()
+		w.conn = nil
+		return 0, err
+	}
+	for i := range res.done {
+		if msg, ok := res.rejected[i]; ok {
+			log.Printf("dropping sync op rejected by %s: %s %s: %s", w.addr, batch[i].Method, batch[i].Path, msg)
+		}
+	}
+	if res.done == 0 {
+		return 0, errors.New(res.stopped)
+	}
+	return res.done, nil
+}
+
+func (w *workerState) sendHTTP(s syncOp) (int, error) {
+	_, err := doRequest(s, w.addr)
+	if err == nil {
+		return 1, nil
+	}
+	if isRejected(err) {
+		log.Printf("dropping sync op rejected by %s: %s %s: %v", w.addr, s.Method, s.Path, err)
+		return 1, nil
+	}
+	return 0, err
 }
 
 func (w *workerState) peek() (syncOp, bool) {
@@ -445,17 +516,38 @@ func (w *workerState) peek() (syncOp, bool) {
 	return w.pending[0], true
 }
 
+// peekBatch returns the first queued ops, up to maxBatchOps of them and
+// about maxBatchBytes of values, but at least one.
+func (w *workerState) peekBatch() []syncOp {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	size := 0
+	for i, s := range w.pending {
+		size += len(s.Body)
+		if i == maxBatchOps || (i > 0 && size > maxBatchBytes) {
+			return append([]syncOp(nil), w.pending[:i]...)
+		}
+	}
+	return append([]syncOp(nil), w.pending...)
+}
+
 func (w *workerState) ack() error {
+	return w.ackN(1)
+}
+
+// ackN drops the first n queued ops, with one WAL write for all their acks.
+func (w *workerState) ackN(n int) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if len(w.pending) == 0 {
+	n = min(n, len(w.pending))
+	if n == 0 {
 		return nil
 	}
-	w.pending = w.pending[1:]
+	w.pending = w.pending[n:]
 	// An ack is never fsynced on its own. If a crash loses it, the op and
 	// the ones after it are sent again in order, and the peer ends the same.
-	return w.appendLocked([]byte("A\n"))
+	return w.appendLocked(bytes.Repeat([]byte("A\n"), n), n)
 }
 
 // syncTo returns once the WAL is on disk up to record seq. Callers that
@@ -522,7 +614,7 @@ func (w *workerState) ensureWALFileLocked() error {
 // appendLocked writes one record. A failed write can leave a partial record
 // at the end of the file, which loadWAL skips; nothing is appended after it,
 // since the next call rewrites the file from pending instead.
-func (w *workerState) appendLocked(rec []byte) error {
+func (w *workerState) appendLocked(rec []byte, records int) error {
 	if w.needCheckpoint {
 		return w.checkpointLocked()
 	}
@@ -534,7 +626,7 @@ func (w *workerState) appendLocked(rec []byte) error {
 		w.needCheckpoint = true
 		return err
 	}
-	w.writes++
+	w.writes += records
 	if w.reclaimableLocked() {
 		return w.checkpointLocked()
 	}
@@ -610,7 +702,24 @@ func syncDir(dir string) error {
 	return d.Sync()
 }
 
+// fetchDocument asks a peer for its document, over HTTP if the peer
+// predates the peers protocol.
+func fetchDocument(addr string) (string, error) {
+	pc, err := dialPeer(addr)
+	if errors.Is(err, errPeerUnsupported) {
+		return doRequest(syncOp{Method: http.MethodGet, Path: "/db"}, addr)
+	}
+	if err != nil {
+		return "", err
+	}
+	defer pc.c.Close()
+	return pc.document()
+}
+
 func doRequest(op syncOp, addr string) (string, error) {
+	if !strings.Contains(addr, "://") {
+		addr = "http://" + addr
+	}
 	url := addr + op.Path
 
 	req, err := http.NewRequest(op.Method, url, bytes.NewReader(op.Body))

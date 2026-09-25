@@ -358,9 +358,12 @@ weaker than Raft, and is kept for existing deployments.
 peers:
   listen: :23457                        # accepts writes from other nodes
   addresses:                            # the other nodes' peers.listen
-    - http://10.0.0.2:23457
-    - http://10.0.0.3:23457
+    - 10.0.0.2:23457
+    - 10.0.0.3:23457
 ```
+
+Addresses may also be written `http://10.0.0.2:23457`, as configs from before
+v0.8 do.
 
 - On start, a node with an empty document, such as a new node or one whose
   data directory was replaced, copies the document from the first peer that
@@ -375,6 +378,11 @@ peers:
   reached is retried until it comes back. Its queue has no limit, so while it
   is down every write adds its path and body to the queue, on disk and in
   memory. A write a peer rejects as invalid is dropped.
+- Nodes send each other queued writes over their own protocol on the peers
+  port, up to 256 in one round trip. A node from v0.7 or earlier only takes
+  HTTP on that port; a newer node notices and sends to it over HTTP, one write
+  at a time, and still accepts HTTP from it, so the nodes can be upgraded one
+  at a time.
 - Nothing resolves conflicts. Two nodes that change the same key at about the
   same time can end up with different values.
 

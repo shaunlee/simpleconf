@@ -3,12 +3,14 @@ package peers
 import (
 	"errors"
 	"log"
+	"net"
 	"sync"
 
 	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/shaunlee/simpleconf/internal/db"
+	"github.com/shaunlee/simpleconf/internal/wire"
 )
 
 var (
@@ -57,12 +59,27 @@ func vacuum(c fiber.Ctx) error {
 	return c.Status(202).JSON(fiber.Map{"ok": true})
 }
 
+// Listen serves the peers port: the peers protocol, and the HTTP routes
+// for peers from v0.7 or earlier, told apart by the first byte.
 func Listen(addr string, peerAddrs []string) {
 	Configure(peerAddrs)
 
-	if err := newApp().Listen(addr, fiber.ListenConfig{DisableStartupMessage: true}); err != nil {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
 		log.Panic(err)
 	}
+	mux, app := newServer(ln)
+	if err := app.Listener(mux, fiber.ListenConfig{DisableStartupMessage: true}); err != nil {
+		log.Panic(err)
+	}
+}
+
+// newServer splits ln between the peers protocol, served at once, and the
+// HTTP routes, which the caller serves from the returned listener.
+func newServer(ln net.Listener) (*wire.Mux, *fiber.App) {
+	mux := wire.NewMux(ln, func(first byte) bool { return first == hello[0] })
+	mux.SetHandler(serveTCP)
+	return mux, newApp()
 }
 
 // newApp builds the peer-facing routes, which apply writes to the local db only.
