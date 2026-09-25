@@ -7,7 +7,7 @@ import (
 	"github.com/shaunlee/simpleconf/internal/cluster"
 )
 
-const version = "v0.6.1"
+const version = "v0.7.0"
 
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{
