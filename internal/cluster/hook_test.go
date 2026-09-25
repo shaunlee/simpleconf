@@ -35,7 +35,13 @@ func TestLocalWriteHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	useDefault(t, m)
+	if got := Role(); got != "standalone" {
+		t.Fatalf("Role without Raft or peers = %q want standalone", got)
+	}
 	writes := recordWrites(t)
+	if got := Role(); got != "peer" {
+		t.Fatalf("Role with the peers hook = %q want peer", got)
+	}
 
 	body := []byte(" 9007199254740993 ")
 	if err := ApplySetRaw("n", body); err != nil {

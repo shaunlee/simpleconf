@@ -94,6 +94,9 @@ func TestSingleNodeRaft(t *testing.T) {
 	if got, want := m.leaderHTTPAddr(), "http://127.0.0.1:8080"; got != want {
 		t.Fatalf("leaderHTTPAddr = %q want %q", got, want)
 	}
+	if got := Role(); got != "leader" {
+		t.Fatalf("Role = %q want leader", got)
+	}
 
 	if err := ApplySetRaw("a", []byte(`{"b":9007199254740993}`)); err != nil {
 		t.Fatal(err)
@@ -166,6 +169,9 @@ func TestNoLeader(t *testing.T) {
 
 	if got := m.leaderHTTPAddr(); got != "" {
 		t.Fatalf("leaderHTTPAddr = %q, want empty", got)
+	}
+	if got := m.role(); got != "follower" {
+		t.Fatalf("role = %q want follower", got)
 	}
 	nl, ok := AsNotLeader(m.ApplyDelete("k"))
 	if !ok || nl.LeaderHTTPAddr != "" {

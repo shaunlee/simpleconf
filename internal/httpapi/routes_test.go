@@ -18,6 +18,11 @@ func TestRoutes(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET / status mismatch: got %d", resp.StatusCode)
 	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if got, want := string(body), `{"role":"standalone","version":"`+version+`"}`; got != want {
+		t.Fatalf("GET / = %s want %s", got, want)
+	}
 
 	resp, err = app.Test(httptest.NewRequest(http.MethodPut, "/db/feature.flag", strings.NewReader("true")))
 	if err != nil {
@@ -31,7 +36,7 @@ func TestRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /db/feature.flag failed: %v", err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, _ = io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if got := strings.TrimSpace(string(body)); got != "true" {
 		t.Fatalf("GET /db/feature.flag body mismatch: got %q", got)

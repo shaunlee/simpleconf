@@ -4,6 +4,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/shaunlee/simpleconf/internal/cluster"
 )
 
 const version = "v0.6.1"
@@ -17,7 +18,7 @@ func New() *fiber.App {
 
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"role":    "master",
+			"role":    cluster.Role(),
 			"version": version,
 		})
 	})

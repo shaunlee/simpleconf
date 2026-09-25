@@ -111,7 +111,7 @@ A value is stored as the JSON text the client sent, so an integer such as
 
 | Method and path | Does | Success |
 | --- | --- | --- |
-| `GET /` | server role and version | `200` |
+| `GET /` | the node's role and the version; the role is `leader`, `follower` or `candidate` under Raft, `peer` in peers mode, `standalone` otherwise | `200` |
 | `GET /db` | the whole document | `200` |
 | `GET /db/:key` | the value at a key path; an empty body if there is none | `200` |
 | `PUT /db/:key` | set the value at a key path; the body is raw JSON | `202 {"ok":true}` |

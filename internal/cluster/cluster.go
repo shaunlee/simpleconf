@@ -271,6 +271,26 @@ type Write struct {
 
 var localWriteHook atomic.Pointer[func(Write)]
 
+// Role is what GET / reports for this node: its Raft state (leader,
+// follower or candidate) under Raft, peer in peers mode, where the write
+// hook is installed, and standalone otherwise.
+func Role() string {
+	return getDefault().role()
+}
+
+func (m *Manager) role() string {
+	m.mu.RLock()
+	r := m.raft
+	m.mu.RUnlock()
+	if r != nil {
+		return strings.ToLower(r.State().String())
+	}
+	if localWriteHook.Load() != nil {
+		return "peer"
+	}
+	return "standalone"
+}
+
 // SetLocalWriteHook installs fn to be called after each successful write with
 // Raft disabled; nil removes it. The legacy peers mode uses it to replicate.
 // fn runs on the writer's goroutine and owns the Write it is given.
