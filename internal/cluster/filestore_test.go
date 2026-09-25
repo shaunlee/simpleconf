@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestFileStorePersistAndReload(t *testing.T) {
@@ -59,47 +60,55 @@ func TestFileStorePersistAndReload(t *testing.T) {
 	}
 }
 
-func TestFileStoreCompactsWAL(t *testing.T) {
+// Appending never rewrites the checkpoint, however long the log grows: a
+// rewrite copies every log in memory, and between two Raft snapshots that
+// can be a million of them. The checkpoint is written when Raft drops logs.
+func TestFileStoreCompactsOnlyOnDeleteRange(t *testing.T) {
 	dir := t.TempDir()
-	storeCheckpointEvery = 2
-	t.Cleanup(func() { storeCheckpointEvery = 512 })
+	snapshotPath := filepath.Join(dir, "raft-state.snapshot.json")
+	walPath := filepath.Join(dir, "raft-state.wal")
 
 	s, err := newFileStore(dir)
 	if err != nil {
-		t.Fatalf("newFileStore failed: %v", err)
+		t.Fatal(err)
 	}
+	s.syncEvery(time.Hour) // spare 2000 fsyncs; Close flushes
 	if err := s.Set([]byte("k1"), []byte("v1")); err != nil {
-		t.Fatalf("Set #1 failed: %v", err)
+		t.Fatal(err)
 	}
-	if err := s.Set([]byte("k2"), []byte("v2")); err != nil {
-		t.Fatalf("Set #2 failed: %v", err)
+	for i := uint64(1); i <= 2000; i++ {
+		storeLog(t, s, i)
 	}
-
-	snapshotPath := filepath.Join(dir, "raft-state.snapshot.json")
-	if st, err := os.Stat(snapshotPath); err != nil {
-		t.Fatalf("expected snapshot after checkpoint, err=%v", err)
-	} else if st.Size() == 0 {
-		t.Fatalf("expected non-empty snapshot after checkpoint")
+	if _, err := os.Stat(snapshotPath); !os.IsNotExist(err) {
+		t.Fatalf("checkpoint written while appending: %v", err)
 	}
 
-	walPath := filepath.Join(dir, "raft-state.wal")
+	if err := s.DeleteRange(1, 1990); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(snapshotPath); err != nil || st.Size() == 0 {
+		t.Fatalf("no checkpoint after DeleteRange: %v", err)
+	}
 	if st, err := os.Stat(walPath); err != nil || st.Size() != 0 {
-		size := int64(-1)
-		if err == nil {
-			size = st.Size()
-		}
-		t.Fatalf("expected empty wal after checkpoint, err=%v size=%d", err, size)
+		t.Fatalf("WAL not emptied by the checkpoint: %v", err)
+	}
+	storeLog(t, s, 2001)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
 	}
 
 	s2, err := newFileStore(dir)
 	if err != nil {
-		t.Fatalf("reload newFileStore failed: %v", err)
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	first, _ := s2.FirstIndex()
+	last, _ := s2.LastIndex()
+	if first != 1991 || last != 2001 {
+		t.Fatalf("reloaded logs %d..%d, want 1991..2001", first, last)
 	}
 	if v, err := s2.Get([]byte("k1")); err != nil || string(v) != "v1" {
-		t.Fatalf("reloaded k1 mismatch: val=%q err=%v", string(v), err)
-	}
-	if v, err := s2.Get([]byte("k2")); err != nil || string(v) != "v2" {
-		t.Fatalf("reloaded k2 mismatch: val=%q err=%v", string(v), err)
+		t.Fatalf("reloaded k1 = %q, %v", v, err)
 	}
 }
 

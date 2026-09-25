@@ -48,7 +48,8 @@ func TestAlwaysFsyncsLogAppends(t *testing.T) {
 	}
 }
 
-// Under everysec, log appends and deletes skip the fsync; term and vote do not.
+// Under everysec, log appends skip the fsync; term and vote do not. Deletes
+// write a checkpoint, which is always fsynced.
 func TestEverysecDefersOnlyLogWrites(t *testing.T) {
 	s, err := newFileStore(t.TempDir())
 	if err != nil {
@@ -59,9 +60,6 @@ func TestEverysecDefersOnlyLogWrites(t *testing.T) {
 
 	storeLog(t, s, 1)
 	storeLog(t, s, 2)
-	if err := s.DeleteRange(2, 2); err != nil {
-		t.Fatal(err)
-	}
 	if syncs, dirty := syncState(s); syncs != 0 || !dirty {
 		t.Fatalf("after log writes: syncs=%d dirty=%v, want 0 true", syncs, dirty)
 	}
@@ -137,10 +135,6 @@ func TestCloseFsyncsPendingWrites(t *testing.T) {
 
 // A checkpoint persists every log in memory, so it leaves nothing pending.
 func TestCheckpointClearsPending(t *testing.T) {
-	prev := storeCheckpointEvery
-	storeCheckpointEvery = 3
-	defer func() { storeCheckpointEvery = prev }()
-
 	s, err := newFileStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +143,9 @@ func TestCheckpointClearsPending(t *testing.T) {
 	s.syncEvery(time.Hour)
 	storeLog(t, s, 1)
 	storeLog(t, s, 2)
-	storeLog(t, s, 3) // third WAL write: checkpoint
+	if err := s.DeleteRange(1, 1); err != nil { // checkpoint
+		t.Fatal(err)
+	}
 	if _, dirty := syncState(s); dirty {
 		t.Fatal("checkpoint left the WAL marked dirty")
 	}

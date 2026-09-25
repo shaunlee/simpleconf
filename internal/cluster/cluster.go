@@ -146,6 +146,11 @@ func Start(cfg Config) (*Manager, error) {
 	// into the buffer, not being taken from it; waiting for the commit was
 	// never bounded.
 	raftCfg.BatchApplyCh = true
+	// Raft drops old logs only after a snapshot, and by default it checks
+	// whether one is due every 2 to 4 minutes. Under steady writes a million
+	// logs piled up in between, all held in memory and in the log store.
+	// A snapshot is the document's JSON, so taking one sooner is cheap.
+	raftCfg.SnapshotInterval = 10 * time.Second
 
 	addr, err := net.ResolveTCPAddr("tcp", cfg.RaftAddr)
 	if err != nil {

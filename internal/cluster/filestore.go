@@ -16,8 +16,6 @@ import (
 	"time"
 )
 
-var storeCheckpointEvery = 512
-
 type fileStore struct {
 	mu sync.RWMutex
 
@@ -32,7 +30,6 @@ type fileStore struct {
 	kvInt     map[string]uint64
 
 	walFile *os.File
-	walOps  int
 
 	// With lazySync set (raft.fsync: everysec), log appends return before
 	// they are fsynced and a background loop fsyncs them within a second.
@@ -194,7 +191,6 @@ func (s *fileStore) replayWALLocked() error {
 			if err := s.applyWALRecordLocked(rec); err != nil {
 				return err
 			}
-			s.walOps++
 		}
 		good += int64(len(line))
 	}
@@ -230,6 +226,7 @@ func (s *fileStore) applyWALRecordLocked(rec walRecord) error {
 			s.logs[l.Index] = l
 		}
 	case "delete_range":
+		// Written by v0.6.0 and earlier; DeleteRange now checkpoints instead.
 		for i := rec.Min; i <= rec.Max; i++ {
 			delete(s.logs, i)
 			if i == rec.Max {
@@ -282,10 +279,6 @@ func (s *fileStore) appendWALLocked(rec walRecord, durable bool) error {
 	} else {
 		s.dirty = true
 	}
-	s.walOps++
-	if s.walOps >= storeCheckpointEvery {
-		return s.compactLocked()
-	}
 	return nil
 }
 
@@ -309,7 +302,6 @@ func (s *fileStore) compactLocked() error {
 	}
 	// Everything the old WAL held is in the fsynced checkpoint.
 	s.dirty = false
-	s.walOps = 0
 	return nil
 }
 
@@ -543,11 +535,11 @@ func (s *fileStore) DeleteRange(min, max uint64) error {
 		}
 	}
 	s.recomputeBoundsLocked()
-	return s.appendWALLocked(walRecord{
-		Type: "delete_range",
-		Min:  min,
-		Max:  max,
-	}, false)
+	// Raft drops logs after a snapshot, which leaves few of them, so this is
+	// when the checkpoint is rewritten. Doing it every so many appends
+	// instead copied every log still in memory each time, and between two
+	// snapshots that can be a million.
+	return s.compactLocked()
 }
 
 func (s *fileStore) Set(key []byte, val []byte) error {
