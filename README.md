@@ -267,6 +267,62 @@ raft:
     - node-3,10.0.0.3:7001,http://10.0.0.3:23456
 ```
 
+The addresses can be hostnames, as long as every node can resolve and reach
+them. Three nodes in Docker Compose:
+
+```yaml
+# compose.yaml
+services:
+  node1:
+    image: shonhen/simpleconf
+    hostname: node1
+    ports: ["23451:23456"]
+    volumes: ["./node1.yml:/configs/config.yml:ro", "node1:/data"]
+  node2:
+    image: shonhen/simpleconf
+    hostname: node2
+    ports: ["23452:23456"]
+    volumes: ["./node2.yml:/configs/config.yml:ro", "node2:/data"]
+  node3:
+    image: shonhen/simpleconf
+    hostname: node3
+    ports: ["23453:23456"]
+    volumes: ["./node3.yml:/configs/config.yml:ro", "node3:/data"]
+
+volumes:
+  node1:
+  node2:
+  node3:
+```
+
+```yaml
+# node1.yml
+db:
+  dir: /data
+listen: :23456
+raft:
+  enabled: true
+  node_id: node1
+  listen: node1:7001
+  http_addr: http://node1:23456
+  bootstrap: true
+  peers:
+    - node1,node1:7001,http://node1:23456
+    - node2,node2:7001,http://node2:23456
+    - node3,node3:7001,http://node3:23456
+```
+
+`node2.yml` and `node3.yml` are the same with their own `node_id`, `listen`
+and `http_addr`, and without `bootstrap`. After `docker compose up -d`, a write
+to any node reaches all three; followers apply it a moment after
+the reply:
+
+```bash
+curl -X PUT localhost:23452/db/app.name -d '"demo"'
+sleep 1
+curl localhost:23453/db/app          # {"name":"demo"}
+```
+
 Writes are committed through the leader. A follower passes a write on to the
 leader's HTTP address by default; with `raft.forward: false` it refuses the
 write and names the leader instead. Reads are answered by the node that
