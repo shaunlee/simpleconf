@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>simpleconf: one JSON document every service reads</title>
+<meta name="description" content="A configuration server in Go. It holds one JSON document that clients read and write by key path over HTTP or a line-based TCP protocol, with an append-only file and an optional Raft cluster.">
+<link rel="canonical" href="https://shaunlee.github.io/simpleconf/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="simpleconf: one JSON document every service reads">
+<meta property="og:description" content="A configuration server in Go: one JSON document, read and written by key path over HTTP or TCP.">
+<meta property="og:url" content="https://shaunlee.github.io/simpleconf/">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#101624">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/inter-latin-var.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="copy" viewBox="0 0 20 20">
+    <rect x="7" y="7" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <path d="M13 4.5V4a1.5 1.5 0 0 0-1.5-1.5h-7A1.5 1.5 0 0 0 3 4v7a1.5 1.5 0 0 0 1.5 1.5H5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  </symbol>
+  <symbol id="check" viewBox="0 0 20 20">
+    <path d="m4.5 10.5 3.5 3.5 7.5-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+</svg>
+
+<header class="nav">
+  <div class="container nav-inner">
+    <a class="brand" href="./">simpleconf</a>
+    <nav aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#performance">Performance</a>
+      <a href="#durability">Durability</a>
+      <a href="https://github.com/shaunlee/simpleconf#readme">Docs</a>
+      <a class="btn btn-primary btn-sm" href="https://github.com/shaunlee/simpleconf">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="container hero-inner">
+    <div class="hero-copy">
+      <p class="hero-eyebrow">A configuration server for shared settings</p>
+      <h1>One JSON document.<br>Every service reads it.</h1>
+      <p class="hero-lede">Clients read and write paths such as product.name over HTTP or a line-based TCP protocol. Writes go to an append-only file, and several nodes can run as a Raft cluster.</p>
+      <div class="chip">
+        <code><span class="prompt">$</span> <span id="cmd-run">docker run -p 23456:23456 shonhen/simpleconf</span></code>
+        <button class="copy" type="button" data-copy="cmd-run" aria-label="Copy the docker command"><svg><use href="#copy"/></svg></button>
+      </div>
+      <div class="actions">
+        <a class="btn btn-primary" href="#get-started">Get started</a>
+        <a class="btn btn-secondary" href="https://github.com/shaunlee/simpleconf">View on GitHub</a>
+      </div>
+    </div>
+
+    <div class="doc-visual" role="img" aria-label="Six services, api, worker, web, cron, billing and admin, all reading the same JSON document returned by GET /db">
+      <svg class="wires" viewBox="0 0 569 240" aria-hidden="true">
+        <g fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M75 69.5C98 69.5 93 110 116 110"/>
+          <path d="M75 125.5H116"/>
+          <path d="M75 182C98 182 93 141.5 116 141.5"/>
+          <path d="M494 69.5C471 69.5 476 110 453 110"/>
+          <path d="M494 125.5H453"/>
+          <path d="M494 182C471 182 476 141.5 453 141.5"/>
+        </g>
+        <g fill="currentColor">
+          <circle cx="75" cy="69.5" r="3"/><circle cx="75" cy="125.5" r="3"/><circle cx="75" cy="182" r="3"/>
+          <circle cx="116" cy="110" r="3"/><circle cx="116" cy="125.5" r="3"/><circle cx="116" cy="141.5" r="3"/>
+          <circle cx="494" cy="69.5" r="3"/><circle cx="494" cy="125.5" r="3"/><circle cx="494" cy="182" r="3"/>
+          <circle cx="453" cy="110" r="3"/><circle cx="453" cy="125.5" r="3"/><circle cx="453" cy="141.5" r="3"/>
+        </g>
+      </svg>
+      <div class="doc" aria-hidden="true">
+        <div class="doc-title">GET /db</div>
+<pre class="doc-body">{
+<span class="hl">  <span class="k">"product"</span>: { <span class="k">"name"</span>: <span class="s">"Demo"</span> },</span>
+  <span class="k">"flags"</span>:   { <span class="k">"beta"</span>: <span class="n">true</span> },
+  <span class="k">"limits"</span>:  { <span class="k">"rps"</span>: <span class="n">500</span> }
+}</pre>
+      </div>
+      <span class="pill l" style="top:54px" aria-hidden="true">api</span>
+      <span class="pill l" style="top:110px" aria-hidden="true">worker</span>
+      <span class="pill l" style="top:166.5px" aria-hidden="true">web</span>
+      <span class="pill r" style="top:54px" aria-hidden="true">cron</span>
+      <span class="pill r" style="top:110px" aria-hidden="true">billing</span>
+      <span class="pill r" style="top:166.5px" aria-hidden="true">admin</span>
+    </div>
+  </div>
+  <div class="container">
+    <dl class="stats">
+      <div><dt class="accent">1.02M</dt><dd>HTTP GET/s at 200 connections</dd></div>
+      <div><dt>16.5M</dt><dd>TCP GET/s, 64 commands pipelined</dd></div>
+      <div><dt>10 ns</dt><dd>keyed read, whatever the document size</dd></div>
+      <div><dt>3</dt><dd>fsync modes, from always to no</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <div class="container wide">
+    <header class="section-head center">
+      <p class="eyebrow">Features</p>
+      <h2>For settings that are read often<br>and changed occasionally.</h2>
+      <p class="sub">Feature flags, endpoints, limits. One binary, MIT licensed.</p>
+    </header>
+    <ul class="features">
+      <li class="card">
+        <svg class="icon" viewBox="0 0 44 44" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="7" r="2.8"/><path d="M9.3 7H26M17 7v26c0 2 1 3 3 3h13M17 21h14"/><path d="m28 18 3 3-3 3M30 33l3 3-3 3"/></g></svg>
+        <h3>Key paths</h3>
+        <p>Read and write paths such as <code>friends.0.last</code>. Over TCP, reads also take gjson queries such as <code>friends.#(age&gt;45)#.first</code>.</p>
+      </li>
+      <li class="card">
+        <svg class="icon" viewBox="0 0 44 44" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="24" height="12" rx="3"/><rect x="18" y="26" width="22" height="12" rx="3"/><path d="M30 9h5v8M32.5 14.5 35 17l2.5-2.5M12 32H6v-8M3.5 26.5 6 24l2.5 2.5"/></g><g fill="currentColor" font-family="JetBrains Mono, monospace" font-size="7.4" font-weight="600" text-anchor="middle"><text x="14" y="11.7">HTTP</text><text x="29" y="34.7">TCP</text></g></svg>
+        <h3>HTTP and TCP</h3>
+        <p>A plain HTTP API, and a line-based TCP protocol that answers pipelined commands in fewer writes.</p>
+      </li>
+      <li class="card">
+        <svg class="icon" viewBox="0 0 44 44" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 40H7a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h15l7 7v8"/><path d="M22 3v7h7"/><path d="M4 23h11M11 19l4 4-4 4"/><circle cx="32" cy="31" r="8"/><path d="M32 26.5V31l3 2"/></g></svg>
+        <h3>Append-only file</h3>
+        <p>A background writer batches records. You choose when it fsyncs: <code>always</code>, <code>everysec</code> or <code>no</code>.</p>
+      </li>
+      <li class="card">
+        <svg class="icon" viewBox="0 0 44 44" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="22" cy="9" r="5"/><circle cx="8" cy="33" r="4.5"/><circle cx="36" cy="33" r="4.5"/><path d="M15 11.5A15 15 0 0 0 7 26M29 11.5A15 15 0 0 1 37 26M13 37.5a15 15 0 0 0 18 0"/></g><circle cx="22" cy="9" r="2.4" fill="currentColor"/></svg>
+        <h3>Raft cluster</h3>
+        <p>Writes are committed through the leader. Followers pass writes on to it over the Raft port.</p>
+      </li>
+      <li class="card">
+        <svg class="icon" viewBox="0 0 44 44" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4.5"/><circle cx="36" cy="8" r="4.5"/><circle cx="8" cy="36" r="4.5"/><circle cx="36" cy="36" r="4.5"/><path d="M12.5 8h19M12.5 36h19M8 12.5v19M36 12.5v19M11.5 11.5l21 21M32.5 11.5l-21 21"/></g></svg>
+        <h3>Peers mode</h3>
+        <p>A simpler option kept for existing deployments: each node queues its writes and sends them to the others.</p>
+      </li>
+      <li class="card">
+        <svg class="icon" viewBox="0 0 44 44" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 40H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h24a3 3 0 0 1 3 3v12"/><circle cx="18" cy="17" r="8"/><circle cx="18" cy="17" r="2"/><path d="m16 21-6 9"/><path d="M32 24 23.5 39h17Z"/><path d="M32 29.5v4.5"/></g><circle cx="32" cy="36.6" r="1.1" fill="currentColor"/></svg>
+        <h3>Fails loudly</h3>
+        <p>When the disk breaks, writes are refused or the server exits, as Redis and PostgreSQL do.</p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section class="section" id="performance">
+  <div class="container narrow">
+    <header class="section-head">
+      <p class="eyebrow">Performance</p>
+      <h2>1.02M GET/s over HTTP.<br>16.5M over pipelined TCP.</h2>
+      <p class="sub">Requests per second for one key, wrk -t4 -c200, every server on the same machine. Higher is better.</p>
+    </header>
+    <figure class="chart">
+      <table class="bars">
+        <caption class="sr-only">HTTP requests per second for one key, wrk -t4 -c200</caption>
+        <thead class="sr-only"><tr><th>Operation</th><th>Server</th><th>Requests per second</th></tr></thead>
+        <tbody>
+          <tr style="--v:1020"><th class="group" rowspan="3" scope="rowgroup"><span>GET</span></th><th scope="row">simpleconf</th><td class="track"><span class="bar ours"></span><span class="val">1.02M</span></td></tr>
+          <tr style="--v:162"><th scope="row">Consul 1.21</th><td class="track"><span class="bar"></span><span class="val">162k</span></td></tr>
+          <tr style="--v:44"><th scope="row">etcd 3.6</th><td class="track"><span class="bar"></span><span class="val">44k</span></td></tr>
+        </tbody>
+        <tbody>
+          <tr style="--v:674"><th class="group" rowspan="3" scope="rowgroup"><span>PUT</span></th><th scope="row">simpleconf</th><td class="track"><span class="bar ours"></span><span class="val">674k</span></td></tr>
+          <tr style="--v:46"><th scope="row">Consul 1.21</th><td class="track"><span class="bar"></span><span class="val">46k</span></td></tr>
+          <tr style="--v:33"><th scope="row">etcd 3.6</th><td class="track"><span class="bar"></span><span class="val">33k</span></td></tr>
+        </tbody>
+      </table>
+    </figure>
+    <p class="footnote">simpleconf fsyncs once a second by default; etcd and Consul fsync every write before replying, so these gaps overstate the difference in code. Setup, Valkey results and caveats: <a href="https://github.com/shaunlee/simpleconf/blob/main/docs/benchmarks.md">docs/benchmarks.md</a>.</p>
+  </div>
+</section>
+
+<section class="section" id="durability">
+  <div class="container narrow">
+    <header class="section-head">
+      <p class="eyebrow">Durability</p>
+      <h2>You choose when it fsyncs.</h2>
+    </header>
+    <div class="fsync-wrap">
+      <table class="fsync">
+        <colgroup><col style="width:26%"><col style="width:19%"><col style="width:26.5%"><col></colgroup>
+        <thead><tr><th scope="col"><code>db.fsync</code></th><th scope="col">Survives kill -9</th><th scope="col">Survives power loss</th><th scope="col">Cost</th></tr></thead>
+        <tbody>
+          <tr><th scope="row"><code>always</code></th><td><svg class="tick" role="img" aria-label="yes"><use href="#check"/></svg></td><td><svg class="tick" role="img" aria-label="yes"><use href="#check"/></svg></td><td>writes wait for the fsync</td></tr>
+          <tr class="default"><th scope="row"><code>everysec (default)</code></th><td><svg class="tick" role="img" aria-label="yes"><use href="#check"/></svg></td><td>up to 1s of writes lost</td><td>negligible</td></tr>
+          <tr><th scope="row"><code>no</code></th><td><svg class="tick" role="img" aria-label="yes"><use href="#check"/></svg></td><td>lost until the OS flushes</td><td>none</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="footnote">With Raft, <code>raft.fsync</code> decides instead: by default a write is acknowledged once a majority of nodes have fsynced it.</p>
+  </div>
+</section>
+
+<section class="section" id="get-started">
+  <div class="container narrow">
+    <header class="section-head center">
+      <p class="eyebrow">Get started</p>
+      <h2>Up in one command.</h2>
+    </header>
+
+    <div class="code-panel" data-tabs>
+      <div class="tabs" role="tablist" aria-label="Install method">
+        <button role="tab" type="button" id="tab-docker" aria-controls="pane-docker" aria-selected="true">Docker</button>
+        <button role="tab" type="button" id="tab-go" aria-controls="pane-go" aria-selected="false" tabindex="-1">Go</button>
+      </div>
+      <button class="copy copy-solid" type="button" data-copy-active aria-label="Copy the commands"><svg><use href="#copy"/></svg></button>
+      <div class="pane" role="tabpanel" id="pane-docker" aria-labelledby="tab-docker">
+<pre><code data-cmd>$ docker run -p 23456:23456 -v simpleconf-data:/data shonhen/simpleconf</code></pre>
+      </div>
+      <div class="pane" role="tabpanel" id="pane-go" aria-labelledby="tab-go" hidden>
+<pre><code data-cmd>$ go install github.com/shaunlee/simpleconf/cmd/simpleconf@latest
+$ DB_DIR=./data simpleconf</code></pre>
+      </div>
+    </div>
+    <p class="panel-note" data-note="pane-docker">Data lives in the <code>/data</code> volume. <code>linux/amd64</code> and <code>linux/arm64</code>.</p>
+    <p class="panel-note" data-note="pane-go" hidden>Go 1.25 or later. HTTP listens on <code>:23456</code>.</p>
+
+    <div class="pair">
+      <div class="card card-flat">
+        <h3>Or talk to it over TCP</h3>
+<pre class="snippet" aria-label="A TCP session: set product.name to Demo, then read it back">+product.name
+"Demo"
++OK
+=product.name
+$6
+"Demo"</pre>
+        <a class="link" href="https://github.com/shaunlee/simpleconf#tcp-protocol">TCP protocol <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="card card-flat">
+        <h3>When something else fits better</h3>
+        <p>Use etcd or Consul if you need:</p>
+        <ul class="dots">
+          <li>Watches on keys</li>
+          <li>Per-key access control or TLS</li>
+          <li>Data that does not comfortably fit in memory</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="cta">
+      <h2>Start with one node. Add Raft when you need it.</h2>
+      <div class="actions">
+        <a class="btn btn-primary" href="#get-started">Get started</a>
+        <a class="btn btn-outline" href="https://github.com/shaunlee/simpleconf">View on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="container narrow"><div class="footer-inner">
+    <div class="footer-brand">
+      <a class="brand" href="./">simpleconf</a>
+      <p>MIT licensed</p>
+    </div>
+    <nav class="footer-cols" aria-label="Footer">
+      <div><h4>Project</h4><a href="https://github.com/shaunlee/simpleconf">GitHub</a><a href="https://github.com/shaunlee/simpleconf/releases">Releases</a><a href="https://hub.docker.com/r/shonhen/simpleconf">Docker Hub</a></div>
+      <div><h4>Reference</h4><a href="https://github.com/shaunlee/simpleconf#http-api">HTTP API</a><a href="https://github.com/shaunlee/simpleconf#tcp-protocol">TCP protocol</a><a href="https://github.com/shaunlee/simpleconf#configuration">Configuration</a></div>
+      <div><h4>Docs</h4><a href="https://github.com/shaunlee/simpleconf/blob/main/docs/ARCHITECTURE.md">Architecture</a><a href="https://github.com/shaunlee/simpleconf/blob/main/docs/benchmarks.md">Benchmarks</a><a href="https://pkg.go.dev/github.com/shaunlee/simpleconf">pkg.go.dev</a></div>
+    </nav>
+  </div></div>
+</footer>
+
+<script>
+(() => {
+  const copy = async (btn, text) => {
+    try { await navigator.clipboard.writeText(text); } catch { return; }
+    btn.classList.add('done');
+    setTimeout(() => btn.classList.remove('done'), 1200);
+  };
+  // The leading "$ " is presentation only; copy the commands themselves.
+  const commands = el => el.textContent.split('\n').map(l => l.replace(/^\$ /, '')).join('\n').trim();
+
+  document.querySelectorAll('[data-copy]').forEach(btn => btn.addEventListener('click', () =>
+    copy(btn, document.getElementById(btn.dataset.copy).textContent)));
+
+  const panel = document.querySelector('[data-tabs]');
+  const tabs = [...panel.querySelectorAll('[role=tab]')];
+  const select = tab => tabs.forEach(t => {
+    const on = t === tab, id = t.getAttribute('aria-controls');
+    t.setAttribute('aria-selected', on);
+    t.tabIndex = on ? 0 : -1;
+    document.getElementById(id).hidden = !on;
+    document.querySelector(`[data-note="${id}"]`).hidden = !on;
+  });
+  tabs.forEach((t, i) => {
+    t.addEventListener('click', () => select(t));
+    t.addEventListener('keydown', e => {
+      const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (d) { const n = tabs[(i + d + tabs.length) % tabs.length]; n.focus(); select(n); }
+    });
+  });
+  panel.querySelector('[data-copy-active]').addEventListener('click', e =>
+    copy(e.currentTarget, commands(panel.querySelector('[role=tabpanel]:not([hidden]) [data-cmd]'))));
+})();
+</script>
+</body>
+</html>

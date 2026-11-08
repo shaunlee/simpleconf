@@ -1,9 +1,16 @@
 name: test
 
+# Changes to the project site alone build and test nothing new.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "site/**"
+      - ".github/workflows/pages.yml"
   pull_request:
+    paths-ignore:
+      - "site/**"
+      - ".github/workflows/pages.yml"
 
 jobs:
   test:
