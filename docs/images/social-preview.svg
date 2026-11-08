@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="simpleconf: one JSON document every service reads. A configuration server in Go.">
+  <defs>
+    <radialGradient id="glow" cx="1010" cy="250" r="330" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2fb8d6" stop-opacity=".26"/>
+      <stop offset=".55" stop-color="#2fb8d6" stop-opacity=".07"/>
+      <stop offset="1" stop-color="#2fb8d6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="640" fill="#101624"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <g font-family="Inter, system-ui, -apple-system, 'Segoe UI', sans-serif">
+    <text x="72" y="104" font-size="32" font-weight="600" letter-spacing="-.3" fill="#f4f6fa">simpleconf</text>
+    <text x="1208" y="102" text-anchor="end" font-size="20" fill="#a1a9b8">MIT · written in Go</text>
+
+    <text x="72" y="214" font-size="62" font-weight="700" letter-spacing="-1.9" fill="#f4f6fa">One JSON document.</text>
+    <text x="72" y="284" font-size="62" font-weight="700" letter-spacing="-1.9" fill="#f4f6fa">Every service reads it.</text>
+    <text x="72" y="338" font-size="24" fill="#a1a9b8">Clients read and write key paths over HTTP or TCP.</text>
+
+    <line x1="72" y1="392" x2="1208" y2="392" stroke="#232c40"/>
+    <line x1="458" y1="420" x2="458" y2="506" stroke="#232c40"/>
+    <line x1="844" y1="420" x2="844" y2="506" stroke="#232c40"/>
+
+    <text x="72" y="460" font-size="48" font-weight="700" letter-spacing="-1.4" fill="#2fb8d6">1.02M</text>
+    <text x="72" y="496" font-size="21" fill="#a1a9b8">HTTP GET/s at 200 connections</text>
+    <text x="490" y="460" font-size="48" font-weight="700" letter-spacing="-1.4" fill="#c9cedb">16.5M</text>
+    <text x="490" y="496" font-size="21" fill="#a1a9b8">TCP GET/s, pipelined</text>
+    <text x="876" y="460" font-size="48" font-weight="700" letter-spacing="-1.4" fill="#c9cedb">10 ns</text>
+    <text x="876" y="496" font-size="21" fill="#a1a9b8">keyed read, in memory</text>
+
+    <text x="1208" y="582" text-anchor="end" font-size="20" fill="#a1a9b8">shaunlee.github.io/simpleconf</text>
+
+    <g font-size="18" fill="#d3d8e2" text-anchor="middle">
+      <rect x="788" y="181" width="50" height="34" rx="17" fill="#1c2233" stroke="#384360"/>
+      <text x="813" y="204">api</text>
+      <rect x="756" y="236" width="82" height="34" rx="17" fill="#1c2233" stroke="#384360"/>
+      <text x="797" y="259">worker</text>
+      <rect x="776" y="291" width="62" height="34" rx="17" fill="#1c2233" stroke="#384360"/>
+      <text x="807" y="314">web</text>
+    </g>
+  </g>
+
+  <g fill="none" stroke="#2fb8d6" stroke-width="1.8">
+    <path d="M846 198C866 198 863 240 883 240"/>
+    <path d="M846 253H883"/>
+    <path d="M846 308C866 308 863 266 883 266"/>
+  </g>
+  <g fill="#2fb8d6">
+    <circle cx="846" cy="198" r="3.2"/><circle cx="846" cy="253" r="3.2"/><circle cx="846" cy="308" r="3.2"/>
+    <circle cx="883" cy="240" r="3.2"/><circle cx="883" cy="253" r="3.2"/><circle cx="883" cy="266" r="3.2"/>
+  </g>
+
+  <rect x="890" y="150" width="318" height="200" rx="12" fill="#20283b" stroke="#2e3b55"/>
+  <line x1="890" y1="195" x2="1208" y2="195" stroke="#2b3550"/>
+  <rect x="900" y="239" width="298" height="25" rx="6" fill="#2fb8d6" fill-opacity=".22"/>
+  <g font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="14" fill="#d3d8e2">
+    <text x="908" y="178">GET /db</text>
+    <text x="908" y="227">{</text>
+    <text x="908" y="257">&#160;&#160;<tspan fill="#6fd3ea">"product"</tspan>: { <tspan fill="#6fd3ea">"name"</tspan>: <tspan fill="#a5e8a0">"Demo"</tspan> },</text>
+    <text x="908" y="282">&#160;&#160;<tspan fill="#6fd3ea">"flags"</tspan>:&#160;&#160; { <tspan fill="#6fd3ea">"beta"</tspan>: <tspan fill="#f0b46a">true</tspan> },</text>
+    <text x="908" y="307">&#160;&#160;<tspan fill="#6fd3ea">"limits"</tspan>:&#160; { <tspan fill="#6fd3ea">"rps"</tspan>: <tspan fill="#f0b46a">500</tspan> }</text>
+    <text x="908" y="332">}</text>
+  </g>
+
+  <rect x="72" y="550" width="566" height="48" rx="8" fill="#1c2335" stroke="#2e3850"/>
+  <text x="94" y="580" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="19" fill="#f4f6fa"><tspan fill="#2fb8d6">$</tspan> docker run -p 23456:23456 shonhen/simpleconf</text>
+</svg>
