@@ -39,3 +39,18 @@ jobs:
           path: _site
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+      # Tells Bing (and through it ChatGPT search and Copilot), Yandex and the
+      # other IndexNow engines that the page changed. The key file lives in
+      # site/, so it authorizes URLs under /simpleconf/ only. 202 means the key
+      # is still being validated. A failed ping does not undo the deploy.
+      - name: Ping IndexNow
+        continue-on-error: true
+        env:
+          KEY: 25b5dae15284eb062a01c5c8a6c2d837
+          SITE: https://shaunlee.github.io/simpleconf/
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -G https://api.indexnow.org/indexnow \
+            --data-urlencode "url=$SITE" --data-urlencode "key=$KEY" \
+            --data-urlencode "keyLocation=${SITE}${KEY}.txt")
+          echo "IndexNow replied $code"
+          case $code in 200|202) ;; *) exit 1 ;; esac

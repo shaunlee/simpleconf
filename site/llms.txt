@@ -1,0 +1,32 @@
+# simpleconf
+
+> simpleconf is a configuration server that holds a single JSON document and lets clients read and write paths inside it, such as `product.name`, over HTTP or a line-based TCP protocol. Writes go to an append-only file. Several nodes can run as a Raft cluster.
+
+It is written in Go, MIT licensed, and ships as one binary or the `shonhen/simpleconf` Docker image (linux/amd64, linux/arm64). It is meant for the small, shared settings a handful of services read often and change occasionally: feature flags, endpoints, limits.
+
+Use etcd or Consul instead if you need watches on keys, per-key access control, TLS, or data that does not comfortably fit in memory. simpleconf has none of those, and no authentication: keep its ports on a private network or put a proxy in front.
+
+Quick start:
+
+```bash
+docker run -p 23456:23456 -v simpleconf-data:/data shonhen/simpleconf
+curl -X PUT localhost:23456/db/product.name -d '"Demo"'
+curl localhost:23456/db/product          # {"name":"Demo"}
+```
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/shaunlee/simpleconf/main/README.md): quick start, key paths and gjson queries, HTTP API, TCP protocol, configuration, durability and fsync modes, Raft cluster, peers mode
+- [Architecture](https://raw.githubusercontent.com/shaunlee/simpleconf/main/docs/ARCHITECTURE.md): read and write paths, Raft and peers modes, node-to-node protocols
+- [Benchmarks](https://raw.githubusercontent.com/shaunlee/simpleconf/main/docs/benchmarks.md): setup, caveats and full tables, including comparisons with etcd, Consul and Valkey
+
+## Project
+
+- [GitHub repository](https://github.com/shaunlee/simpleconf)
+- [Releases and changelog](https://github.com/shaunlee/simpleconf/releases)
+- [Docker Hub image](https://hub.docker.com/r/shonhen/simpleconf)
+- [Go package reference](https://pkg.go.dev/github.com/shaunlee/simpleconf)
+
+## Optional
+
+- [Project structure](https://raw.githubusercontent.com/shaunlee/simpleconf/main/docs/PROJECT_STRUCTURE.md): where each package lives in the repository
